@@ -216,6 +216,12 @@ export function normaliseCurrency(code: string): string | null {
  * Fractional digits beyond the currency's exponent are accepted only when they
  * are all zeros ("12.9900" in USD is 1299); a non-zero digit past the exponent
  * ("12.995" in USD) is not representable and returns null.
+ *
+ * A NEGATIVE amount is refused rather than converted. No new-retail offer is
+ * priced below zero, so a leading minus is markup this reader does not
+ * understand - a subtraction, a discount delta, a broken template - and reading
+ * it as a price puts a number in the history that no comparison can ever be
+ * right about. A typed failure is a visible gap; a negative all-time low is not.
  */
 export function toMinorUnits(price: string, currency: string): bigint | null {
   const exponent = minorUnitExponent(currency);
@@ -223,15 +229,16 @@ export function toMinorUnits(price: string, currency: string): bigint | null {
 
   const cleaned = stripCurrencyDecoration(price, currency);
   if (cleaned === null) return null;
-
-  const negative = cleaned.startsWith("-");
-  const unsigned = negative ? cleaned.slice(1) : cleaned;
+  // Stated explicitly rather than left to the shape tests below, which would
+  // also reject it: the refusal is a decision about money, not an accident of
+  // a regular expression somebody may widen later.
+  if (cleaned.startsWith("-")) return null;
 
   let digits: string;
-  if (/^\d+(\.\d+)?$/.test(unsigned)) {
-    digits = unsigned;
-  } else if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(unsigned)) {
-    digits = unsigned.replace(/,/g, "");
+  if (/^\d+(\.\d+)?$/.test(cleaned)) {
+    digits = cleaned;
+  } else if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(cleaned)) {
+    digits = cleaned.replace(/,/g, "");
   } else {
     return null;
   }
@@ -242,8 +249,7 @@ export function toMinorUnits(price: string, currency: string): bigint | null {
   if (/[^0]/.test(dropped)) return null;
 
   const padded = kept.padEnd(exponent, "0");
-  const minor = BigInt(whole + padded);
-  return negative ? -minor : minor;
+  return BigInt(whole + padded);
 }
 
 /**

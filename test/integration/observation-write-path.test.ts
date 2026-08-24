@@ -50,8 +50,14 @@ describe("criterion 1: a typed failure writes nothing", () => {
     ["no-offer-markup.html", "no-offer"],
     ["two-variant-offers.html", "ambiguous-offer"],
     ["aggregate-offer-range.html", "ambiguous-offer"],
+    // The same refusals in the other markup dialect. A page that refuses as
+    // JSON-LD and resolves as microdata is a wrong price with a clean suite.
+    ["microdata-two-offers.html", "ambiguous-offer"],
+    ["microdata-aggregate-offer-range.html", "ambiguous-offer"],
+    ["microdata-two-prices-one-offer.html", "ambiguous-offer"],
     ["offer-without-price.html", "no-price"],
     ["price-not-a-number.html", "no-price"],
+    ["negative-price.html", "no-price"],
     ["price-without-currency.html", "no-currency"],
     ["currency-not-iso-4217.html", "no-currency"],
   ] as const;
@@ -159,6 +165,41 @@ describe("criterion 2: exact integer minor units, and the source's zone", () => 
     assert.equal(rows[0].retention, null);
   });
 
+  it("stores the microdata offer's OWN price, not the item's above it", async () => {
+    const rows = await query(
+      container.url,
+      "select amount_minor_units::text as amount, currency " +
+        "from price_observations where listing_id = $1",
+      ["https://example.invalid/tools/table-saw"],
+    );
+    assert.equal(rows.length, 1);
+    // The accessory above the offer is 9.99, which is 999 minor units. A
+    // document-wide itemprop scan stores THAT against this listing and never
+    // reads the offer's own 349.00 at all.
+    assert.equal(rows[0].amount, "34900");
+    assert.equal(rows[0].currency, "USD");
+  });
+
+  it("stores one price stated twice in one offer once, at its value", async () => {
+    const rows = await query(
+      container.url,
+      "select amount_minor_units::text as amount from price_observations " +
+        "where listing_id = $1",
+      ["https://example.invalid/tools/digital-caliper"],
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].amount, "12999");
+  });
+
+  it("holds no negative amount: a price below zero never becomes a row", async () => {
+    const rows = await query(
+      container.url,
+      "select count(*)::text as count from price_observations " +
+        "where amount_minor_units < 0",
+    );
+    assert.equal(rows[0].count, "0");
+  });
+
   it("leaves the store id null: it is HARD-8's dimension, not this phase's", async () => {
     const rows = await query(
       container.url,
@@ -212,7 +253,8 @@ describe("the stored rows are readable as a set", () => {
     for (const row of rows) {
       assert.equal(row.store_id, null);
       assert.match(String(row.currency), /^[A-Z]{3}$/);
-      assert.match(String(row.amount_minor_units), /^-?\d+$/);
+      // No sign: a stored amount is a non-negative exact integer minor unit.
+      assert.match(String(row.amount_minor_units), /^\d+$/);
       assert.ok(String(row.source_time_zone).length > 0);
     }
   });
@@ -225,8 +267,12 @@ function listingIdFor(fixture: string): string {
     "aggregate-offer-range.html": "range",
     "offer-without-price.html": "no-price",
     "price-not-a-number.html": "price-text",
+    "negative-price.html": "negative-price",
     "price-without-currency.html": "no-currency",
     "currency-not-iso-4217.html": "bad-currency",
+    "microdata-two-offers.html": "microdata-two-offers",
+    "microdata-aggregate-offer-range.html": "microdata-range",
+    "microdata-two-prices-one-offer.html": "microdata-two-prices",
   };
   return `https://example.invalid/tools/${slugs[fixture]}`;
 }

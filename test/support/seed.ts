@@ -103,6 +103,28 @@ export const SEED_ENTRIES: SeedEntry[] = [
       rawContext: "",
     },
   },
+  {
+    // The offer's own price, not the accessory's, reaches the history.
+    fixture: "microdata-price-outside-offer.html",
+    context: {
+      sourceId: "fixture-suite-microdata",
+      listingId: "https://example.invalid/tools/table-saw",
+      observedAt: new Date("2026-08-24T13:11:00.000Z"),
+      sourceTimeZone: "America/New_York",
+      rawContext: "",
+    },
+  },
+  {
+    // One price stated twice is one price, and it still resolves.
+    fixture: "microdata-price-stated-twice.html",
+    context: {
+      sourceId: "fixture-suite-microdata",
+      listingId: "https://example.invalid/tools/digital-caliper",
+      observedAt: new Date("2026-08-24T13:12:00.000Z"),
+      sourceTimeZone: "America/New_York",
+      rawContext: "",
+    },
+  },
   // Every one of these refuses. They are seeded on purpose: "wrote nothing" is
   // an assertion, and a suite that only seeds the happy path never makes it.
   { fixture: "no-offer-markup.html", context: refusingContext("category-page") },
@@ -110,6 +132,7 @@ export const SEED_ENTRIES: SeedEntry[] = [
   { fixture: "aggregate-offer-range.html", context: refusingContext("range") },
   { fixture: "offer-without-price.html", context: refusingContext("no-price") },
   { fixture: "price-not-a-number.html", context: refusingContext("price-text") },
+  { fixture: "negative-price.html", context: refusingContext("negative-price") },
   {
     fixture: "price-without-currency.html",
     context: refusingContext("no-currency"),
@@ -117,6 +140,21 @@ export const SEED_ENTRIES: SeedEntry[] = [
   {
     fixture: "currency-not-iso-4217.html",
     context: refusingContext("bad-currency"),
+  },
+  // The microdata dialect refuses the same pages the JSON-LD one does. These
+  // are here because a reader that scans a document instead of an offer element
+  // resolves all three to a wrong number and writes it.
+  {
+    fixture: "microdata-two-offers.html",
+    context: refusingContext("microdata-two-offers"),
+  },
+  {
+    fixture: "microdata-aggregate-offer-range.html",
+    context: refusingContext("microdata-range"),
+  },
+  {
+    fixture: "microdata-two-prices-one-offer.html",
+    context: refusingContext("microdata-two-prices"),
   },
 ];
 

@@ -26,7 +26,9 @@ export type { OfferCandidate } from "./offers.ts";
  *
  * Failure order, which is also the order a reader should think about it:
  *   - `no-offer`        nothing in the markup claims to be an Offer
- *   - `ambiguous-offer` more than one distinct offer, or one price RANGE
+ *   - `ambiguous-offer` more than one distinct offer, one price RANGE, or a
+ *                       single offer stating two prices or two currencies that
+ *                       do not agree
  *   - `no-price`        an offer with no price, or a price no exact minor-unit
  *                       conversion can represent
  *   - `no-currency`     a price whose currency is absent or is not a code this
@@ -41,14 +43,28 @@ export function extractOffer(markup: string): ExtractionResult {
 
   const offer = distinct[0];
   if (offer.priceIsRange) return { ok: false, reason: "ambiguous-offer" };
-  if (offer.price === null) return { ok: false, reason: "no-price" };
+  // Two different currency codes on one offer are not "its ISO 4217 currency".
+  if (offer.currencies.length > 1) return { ok: false, reason: "ambiguous-offer" };
+  if (offer.prices.length === 0) return { ok: false, reason: "no-price" };
 
   const currency =
-    offer.currency === null ? null : normaliseCurrency(offer.currency);
+    offer.currencies.length === 0 ? null : normaliseCurrency(offer.currencies[0]);
   if (currency === null) return { ok: false, reason: "no-currency" };
 
-  const amountMinorUnits = toMinorUnits(offer.price, currency);
-  if (amountMinorUnits === null) return { ok: false, reason: "no-price" };
+  // One offer can spell one price twice - a machine-readable `content` and the
+  // visible text beside it. Those agree once both are converted, and agreeing
+  // is what makes them one price. Two prices that do NOT agree (a struck-out
+  // price and a sale price marked up as the same offer) are not one offer
+  // price, and a gap is visible a week later where a wrong number is not.
+  const amounts = new Set<bigint>();
+  for (const price of offer.prices) {
+    const minor = toMinorUnits(price, currency);
+    if (minor === null) return { ok: false, reason: "no-price" };
+    amounts.add(minor);
+  }
+  if (amounts.size > 1) return { ok: false, reason: "ambiguous-offer" };
+
+  const [amountMinorUnits] = amounts;
 
   return {
     ok: true,
@@ -69,8 +85,8 @@ function dedupe(candidates: OfferCandidate[]): OfferCandidate[] {
   const byIdentity = new Map<string, OfferCandidate>();
   for (const candidate of candidates) {
     const key = JSON.stringify([
-      candidate.price,
-      candidate.currency,
+      candidate.prices,
+      candidate.currencies,
       candidate.availability,
       candidate.priceIsRange,
     ]);

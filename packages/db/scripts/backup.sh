@@ -8,8 +8,8 @@
 # The dump is written in pg_dump's custom format (-Fc), which pg_restore reads
 # and which restores into an empty database without editing. A backup that has
 # never been restored is not a backup, so the restore side of this pair is
-# exercised by an automated test:
-# packages/db/test/integration/restore-proof.test.ts.
+# exercised by an automated test: test/integration/restore-proof.test.ts, at the
+# repo root because it composes this package with the extractor.
 #
 # Environment:
 #   HISTORY_DATABASE_URL   required. libpq URL of the database to dump.

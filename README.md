@@ -27,8 +27,11 @@ TypeScript on Node, PostgreSQL, Drizzle. Three packages behind
   no filesystem. It resolves exactly one offer price and its ISO 4217 currency,
   or it returns a typed failure (`no-offer`, `ambiguous-offer`, `no-price`,
   `no-currency`). It never guesses, because a gap is visible a week later and a
-  wrong number is not. Its fixtures live beside it in `fixtures/`, committed as
-  files, reduced to the offer markup under test: no review body, no reviewer
+  wrong number is not. It reads embedded JSON-LD and schema.org microdata, and
+  scopes every microdata property to the offer element that encloses it, so the
+  markup dialect never changes the verdict: a page carrying two offers at two
+  prices refuses in both. Its fixtures live beside it in `fixtures/`, committed
+  as files, reduced to the offer markup under test: no review body, no reviewer
   name, no account identifier, ever.
 - `packages/db` - the price observation table and its first migration, the write
   path (which takes an `ExtractionResult` and writes nothing at all when it is a

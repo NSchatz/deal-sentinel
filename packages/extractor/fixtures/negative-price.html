@@ -1,0 +1,32 @@
+<!doctype html>
+<!--
+  Fixture: an offer whose price is below zero. No new-retail offer is priced
+  that way, so a leading minus is markup this reader does not understand - a
+  discount delta, a subtraction, a broken template - and reading it as a price
+  puts a number in the history that no later comparison can be right about.
+  The extractor answers `no-price`: an exact integer minor unit of a real offer
+  is what acceptance criterion 2 asks to store, and this is not one.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Impact Driver</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "Impact Driver",
+        "sku": "ID-18V",
+        "offers": {
+          "@type": "Offer",
+          "price": "-129.99",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Impact Driver</h1>
+  </body>
+</html>

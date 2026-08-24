@@ -1,0 +1,31 @@
+<!doctype html>
+<!--
+  Fixture: two schema.org microdata offers on one page, two variants of one
+  product at two different prices. Picking the first offer in document order is
+  the silent way to record the wrong variant's price forever, so the extractor
+  answers `ambiguous-offer` and writes nothing.
+  The JSON-LD twin of this case is `two-variant-offers.html`. This one exists
+  because the microdata reader scopes properties by element rather than by
+  object, and a page can carry either dialect.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Cordless Impact Wrench</title>
+  </head>
+  <body itemscope itemtype="https://schema.org/Product">
+    <h1 itemprop="name">Cordless Impact Wrench</h1>
+    <div itemprop="offers" itemscope itemtype="https://schema.org/Offer">
+      <span itemprop="sku">IW-BARE</span>
+      <meta itemprop="priceCurrency" content="USD" />
+      <span itemprop="price" content="189.00">$189.00</span>
+      <link itemprop="availability" href="https://schema.org/InStock" />
+    </div>
+    <div itemprop="offers" itemscope itemtype="https://schema.org/Offer">
+      <span itemprop="sku">IW-KIT</span>
+      <meta itemprop="priceCurrency" content="USD" />
+      <span itemprop="price" content="279.00">$279.00</span>
+      <link itemprop="availability" href="https://schema.org/InStock" />
+    </div>
+  </body>
+</html>

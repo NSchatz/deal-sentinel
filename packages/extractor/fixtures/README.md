@@ -26,4 +26,17 @@ same shape before it lands.
 | `no-offer-markup.html` | no offer markup, plus a malformed JSON-LD block: `no-offer` |
 | `two-variant-offers.html` | two offers on one page: `ambiguous-offer` |
 | `aggregate-offer-range.html` | an AggregateOffer whose ends differ: `ambiguous-offer` |
+| `negative-price.html` | a price below zero, which no new-retail offer has: `no-price` |
 | `microdata-single-offer.html` | the microdata reader, GBP |
+| `microdata-two-offers.html` | two microdata offers at two prices: `ambiguous-offer`, the same answer its JSON-LD twin gets |
+| `microdata-price-outside-offer.html` | an unrelated priced item above the offer, which must not supply this offer's price |
+| `microdata-aggregate-offer-range.html` | a microdata AggregateOffer whose ends differ: `ambiguous-offer` |
+| `microdata-two-prices-one-offer.html` | one offer element stating a struck-out price and a sale price: `ambiguous-offer` |
+| `microdata-price-stated-twice.html` | one offer element stating one price twice, machine-readable and visible: one price, 12999 |
+
+**Both dialects, on purpose.** The extractor reads JSON-LD and microdata, and a
+markup dialect must never change the verdict on the same page: a multi-offer
+page answers `ambiguous-offer` in either. The microdata rows above exist because
+a reader that scans a whole document for `itemprop` values instead of scoping
+them to their enclosing offer element gets both the multi-offer case and the
+adjacent-item case wrong in the silent direction.

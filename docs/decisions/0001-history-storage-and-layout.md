@@ -65,6 +65,61 @@ Consequences, each of them a test:
   is answered `no-price`. Rounding it would poison the series.
 - A number shape that means two different things in two locales ("1.299") is
   answered `no-price`. Only plain `1299.00` and US-grouped `1,299.00` are read.
+- A price below zero is answered `no-price` rather than converted to a negative
+  amount. No new-retail offer is priced that way, so a leading minus is markup
+  this reader does not understand - a discount delta, a subtraction, a broken
+  template - and one negative row is a permanent wrong answer to every later
+  comparison on that listing. The write path refuses a negative amount too, so
+  the rule holds for a caller that builds a success by hand.
+
+  Not refused, and deliberately: a price whose CURRENCY SYMBOL disagrees with
+  the declared `priceCurrency` code ("£499.00" with `priceCurrency: "USD"`).
+  `priceCurrency` is the authoritative field under schema.org, which is the
+  source the roadmap cites for this phase, and it is the ISO 4217 code the
+  acceptance criterion asks for. Refusing on the symbol would need a table
+  mapping every symbol to the codes it may denote, and that table refuses
+  legitimate markup on the strength of a guess about typography: "$" is written
+  by some thirty currencies and "£" by several. The declared code is read; the
+  symbol is decoration and is stripped.
+
+## An offer's properties are the ones inside its own element
+
+The extractor reads two markup dialects, JSON-LD and schema.org microdata, and
+**a dialect must never change the verdict on the same page**. A JSON-LD offer is
+an object, so its properties are scoped for free. Microdata's are not: a reader
+that scans a document for `itemprop` values gets two things wrong, both in the
+silent direction.
+
+- A page with two offers at two prices resolves to whichever price came first
+  in document order, instead of `ambiguous-offer`. That is the roadmap's own
+  named hazard: "the wrong variant's price is indistinguishable from a true one
+  a week later".
+- An unrelated priced item on the page - the "frequently bought together"
+  accessory - supplies the price stored against this listing, and the offer's
+  own price is never read.
+
+So the microdata reader scopes every property to the offer element that encloses
+it, and skips the subtree of any nested `itemscope`, which is what the microdata
+data model says anyway: a nested item's properties belong to the nested item.
+Each offer element becomes exactly one candidate, and genuinely different
+candidates reach the ambiguity guard.
+
+Two further rules follow from the same principle, that one offer states one
+price:
+
+- One offer element stating the SAME price twice, machine-readable and visible
+  (`<meta itemprop="price" content="129.99">` beside `$129.99`), is one price.
+  The two are compared after conversion to minor units, not as strings, so a
+  currency symbol or a thousands separator does not split them.
+- One offer element stating two prices that do NOT agree - a struck-out
+  was-price marked up as `itemprop="price"` beside the price being asked - is
+  `ambiguous-offer`. Scoping alone cannot separate those two, since both are
+  inside the offer.
+
+The fixtures are the record: `microdata-two-offers.html`,
+`microdata-price-outside-offer.html`, `microdata-two-prices-one-offer.html`,
+`microdata-price-stated-twice.html` and `microdata-aggregate-offer-range.html`
+each pin one of the rules above.
 
 ## Availability is stored as received
 

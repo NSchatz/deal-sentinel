@@ -89,6 +89,17 @@ function buildRow(
   requireText(context.listingId, "listingId");
   requireText(context.sourceTimeZone, "sourceTimeZone");
 
+  if (result.amountMinorUnits < 0n) {
+    // The extractor refuses a negative price before it ever gets here, so this
+    // is the boundary saying the same thing to a caller that built a success
+    // by hand. No new-retail offer is priced below zero, and one negative row
+    // is a permanent wrong answer to every later comparison on that listing.
+    throw new InvalidObservationError(
+      "amountMinorUnits must be a non-negative exact integer minor unit " +
+        `(got ${result.amountMinorUnits}).`,
+    );
+  }
+
   if (context.storeId !== undefined && context.storeId !== null) {
     throw new InvalidObservationError(
       "storeId is reserved for the store-scoped dimension phase HARD-8 adds " +

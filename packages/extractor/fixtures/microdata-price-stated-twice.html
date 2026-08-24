@@ -1,0 +1,25 @@
+<!doctype html>
+<!--
+  Fixture: ONE offer element stating ONE price twice, the way real markup does
+  - a machine-readable `<meta itemprop="price">` beside the visible text, which
+  carries a currency symbol. Two spellings of the same price are one price, and
+  the extractor establishes that by converting both to the currency's own minor
+  units rather than by comparing strings. It resolves to 12999.
+  This fixture is the other half of `microdata-two-prices-one-offer.html`: the
+  refusal there must not cost this page its price.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Digital Caliper</title>
+  </head>
+  <body itemscope itemtype="https://schema.org/Product">
+    <h1 itemprop="name">Digital Caliper</h1>
+    <div itemprop="offers" itemscope itemtype="https://schema.org/Offer">
+      <meta itemprop="priceCurrency" content="USD" />
+      <meta itemprop="price" content="129.99" />
+      <span itemprop="price">$129.99</span>
+      <link itemprop="availability" href="https://schema.org/InStock" />
+    </div>
+  </body>
+</html>

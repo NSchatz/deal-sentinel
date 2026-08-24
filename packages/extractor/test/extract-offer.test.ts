@@ -54,6 +54,33 @@ describe("extractOffer: offers that resolve", () => {
       availability: "https://schema.org/BackOrder",
     });
   });
+
+  it("reads the offer's OWN price, not an unrelated item's above it", () => {
+    // The accessory above this offer is priced 9.99 and is a Product with no
+    // Offer element of its own. A reader that scans every itemprop in the
+    // document stores 999 minor units against this listing forever.
+    const result = extractOffer(fixture("microdata-price-outside-offer.html"));
+    assert.deepEqual(result, {
+      ok: true,
+      amountMinorUnits: 34900n,
+      currency: "USD",
+      availability: "https://schema.org/InStock",
+    });
+  });
+
+  it("treats one price stated twice in one offer as one price", () => {
+    // A `<meta itemprop="price" content="129.99">` beside a visible "$129.99"
+    // is two spellings of one price. They agree once converted, and agreeing is
+    // what makes them one - refusing here would cost a legitimate page its
+    // price for the sake of a string comparison.
+    const result = extractOffer(fixture("microdata-price-stated-twice.html"));
+    assert.deepEqual(result, {
+      ok: true,
+      amountMinorUnits: 12999n,
+      currency: "USD",
+      availability: "https://schema.org/InStock",
+    });
+  });
 });
 
 describe("extractOffer: availability is stored as received", () => {
@@ -80,8 +107,12 @@ describe("extractOffer: typed failures, never a guess", () => {
     ["no-offer-markup.html", "no-offer"],
     ["two-variant-offers.html", "ambiguous-offer"],
     ["aggregate-offer-range.html", "ambiguous-offer"],
+    ["microdata-two-offers.html", "ambiguous-offer"],
+    ["microdata-aggregate-offer-range.html", "ambiguous-offer"],
+    ["microdata-two-prices-one-offer.html", "ambiguous-offer"],
     ["offer-without-price.html", "no-price"],
     ["price-not-a-number.html", "no-price"],
+    ["negative-price.html", "no-price"],
     ["price-without-currency.html", "no-currency"],
     ["currency-not-iso-4217.html", "no-currency"],
   ];
@@ -99,6 +130,24 @@ describe("extractOffer: typed failures, never a guess", () => {
       assert.equal(result.ok, false);
       assert.equal("amountMinorUnits" in result, false);
     }
+  });
+
+  it("refuses a multi-offer page in EITHER dialect, not just JSON-LD", () => {
+    // The two fixtures describe the same page in the two markup dialects this
+    // extractor reads. A dialect that changes the verdict is how the first
+    // price in document order reaches the history unnoticed.
+    assert.deepEqual(
+      extractOffer(fixture("microdata-two-offers.html")),
+      extractOffer(fixture("two-variant-offers.html")),
+    );
+  });
+
+  it("does not resolve the first microdata offer's price", () => {
+    const result = extractOffer(fixture("microdata-two-offers.html"));
+    assert.equal(result.ok, false);
+    // 189.00 is the first offer in document order and 279.00 the second.
+    // Neither may be reported for a page that states both.
+    assert.equal("amountMinorUnits" in result, false);
   });
 });
 
@@ -138,6 +187,18 @@ describe("minor-unit conversion is per-currency, by ISO 4217 exponent", () => {
     assert.equal(toMinorUnits("1.299,00", "EUR"), null);
     assert.equal(toMinorUnits("Call for price", "USD"), null);
     assert.equal(toMinorUnits("", "USD"), null);
+  });
+
+  it("refuses a price below zero rather than storing a negative amount", () => {
+    // No new-retail offer is priced below zero. A negative observation is a
+    // permanent wrong answer to every later comparison on that listing, and
+    // unlike a gap it is invisible once the page is gone.
+    assert.equal(toMinorUnits("-129.99", "USD"), null);
+    assert.equal(toMinorUnits("-1,299.00", "USD"), null);
+    assert.equal(toMinorUnits("$-129.99", "USD"), null);
+    assert.equal(toMinorUnits("-0.01", "USD"), null);
+    // Zero is not negative, and a giveaway is a real observation.
+    assert.equal(toMinorUnits("0.00", "USD"), 0n);
   });
 });
 
