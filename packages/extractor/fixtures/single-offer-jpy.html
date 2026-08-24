@@ -1,0 +1,32 @@
+<!doctype html>
+<!--
+  Fixture: one product, one offer, JSON-LD, JPY.
+  The yen has an ISO 4217 minor-unit exponent of 0, so 12800 yen is 12800 minor
+  units, not 1280000. This fixture exists so the generic exponent path is
+  exercised rather than merely intended: a fixed multiply-by-100 passes every
+  USD fixture in this directory and fails this one.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="ja">
+  <head>
+    <title>Folding Saw 240mm</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "Folding Saw 240mm",
+        "sku": "SAW-240-FOLD",
+        "offers": {
+          "@type": "Offer",
+          "url": "https://example.invalid/tools/folding-saw-240",
+          "price": "12800",
+          "priceCurrency": "JPY",
+          "availability": "https://schema.org/InStock"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Folding Saw 240mm</h1>
+  </body>
+</html>

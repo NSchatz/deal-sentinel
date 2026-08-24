@@ -1,0 +1,31 @@
+<!doctype html>
+<!--
+  Fixture: a product page with no offer markup of any kind.
+  A category page, a page whose structured data was dropped in a redesign, or a
+  block that is not valid JSON all land here. The extractor answers `no-offer`.
+  The second JSON-LD block below is deliberately malformed, to prove a broken
+  block is skipped rather than pattern-matched with a regex.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Hand Tools</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Tools" },
+          { "@type": "ListItem", "position": 2, "name": "Hand Tools" }
+        ]
+      }
+    </script>
+    <script type="application/ld+json">
+      { "@context": "https://schema.org", "@type": "Product", "offers": {
+    </script>
+  </head>
+  <body>
+    <h1>Hand Tools</h1>
+    <p>Browse the category.</p>
+  </body>
+</html>

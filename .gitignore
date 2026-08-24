@@ -1,0 +1,10 @@
+node_modules/
+*.tsbuildinfo
+
+# Backups are data, not source. `packages/db/scripts/backup.sh` writes here by
+# default and a history dump never belongs in git.
+backups/
+
+# The restore proof makes one of these per run and removes it again. A crashed
+# run should not leave a dump staged for commit.
+backups-test-*/

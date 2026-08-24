@@ -1,0 +1,31 @@
+<!doctype html>
+<!--
+  Fixture: a priceCurrency that is not an ISO 4217 alphabetic code.
+  Some sites emit a symbol or a marketing string in priceCurrency. There is no
+  minor-unit exponent for "$", so no exact integer conversion exists and the
+  extractor answers `no-currency`.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Digital Angle Finder</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "Digital Angle Finder",
+        "sku": "ANG-FIND-DIG",
+        "offers": {
+          "@type": "Offer",
+          "url": "https://example.invalid/tools/digital-angle-finder",
+          "price": "38.50",
+          "priceCurrency": "$",
+          "availability": "https://schema.org/InStock"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Digital Angle Finder</h1>
+  </body>
+</html>

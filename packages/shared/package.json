@@ -1,0 +1,12 @@
+{
+  "name": "@deal-sentinel/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cross-package types shared by the extractor, the write path, and every later phase.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts"
+}

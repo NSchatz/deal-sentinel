@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1787541059196,
+      "tag": "0000_history_1_price_observations",
+      "breakpoints": true
+    }
+  ]
+}

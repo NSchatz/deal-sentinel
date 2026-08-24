@@ -1,0 +1,55 @@
+name: deal-sentinel
+
+# The history database, and the volume that is the whole point of this file.
+#
+# `docker compose down -v` removes "named volumes declared in the volumes
+# section of the Compose file", and that command is one character from the
+# ordinary way to reset a misbehaving stack. The price history cannot be
+# backfilled, so the volume below is declared EXTERNAL: compose will not create
+# it and will not remove it, and `down -v` leaves it alone. Creating it is a
+# deliberate act, once:
+#
+#   docker volume create deal-sentinel-history
+#   docker compose up -d history-db
+#   HISTORY_DATABASE_URL=... pnpm db:init      # creates the schema, once
+#
+# and every ordinary start after that runs `pnpm db:start-check` first, which
+# refuses to start when the completed-initialization marker is not there.
+
+services:
+  history-db:
+    image: postgres:16-alpine
+    container_name: deal-sentinel-history-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${HISTORY_DB_USER:-sentinel}
+      POSTGRES_PASSWORD: ${HISTORY_DB_PASSWORD:?set HISTORY_DB_PASSWORD before starting the history database}
+      POSTGRES_DB: ${HISTORY_DB_NAME:-deal_sentinel_history}
+      # Keep the data directory a subdirectory of the mount point, so the volume
+      # can carry a lost+found without confusing initdb.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - history:/var/lib/postgresql/data
+    ports:
+      # Bound to loopback: nothing here is exposed beyond the LAN by default,
+      # and the database is not exposed beyond the host at all.
+      - "127.0.0.1:${HISTORY_DB_PORT:-5432}:5432"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${HISTORY_DB_USER:-sentinel} -d ${HISTORY_DB_NAME:-deal_sentinel_history}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  history:
+    name: deal-sentinel-history
+    # External on purpose. See the note at the top of this file: compose neither
+    # creates nor destroys this volume, so `docker compose down -v` cannot take
+    # the price history with it. If the volume is missing, `docker compose up`
+    # refuses to start and says which volume it wanted, which is the same
+    # fail-safe the start-up check applies inside the database.
+    external: true

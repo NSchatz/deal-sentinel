@@ -1,0 +1,30 @@
+<!doctype html>
+<!--
+  Fixture: a resolvable offer that declares no availability at all.
+  The price and currency resolve; the availability field is absent, which is
+  distinct from an unrecognised token and is recorded as "the markup said
+  nothing" rather than as in-stock.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Sanding Belt Pack</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "Sanding Belt Pack",
+        "sku": "SAND-BELT-10",
+        "offers": {
+          "@type": "Offer",
+          "url": "https://example.invalid/tools/sanding-belt-pack",
+          "price": "18.75",
+          "priceCurrency": "USD"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Sanding Belt Pack</h1>
+  </body>
+</html>

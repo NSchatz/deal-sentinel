@@ -1,0 +1,32 @@
+<!doctype html>
+<!--
+  Fixture: a price with no resolvable ISO 4217 currency.
+  The visible page says "$249.00", but the markup declares no priceCurrency.
+  A dollar sign is not an ISO 4217 code (it is shared by more than twenty
+  currencies), so there is nothing to compare against history and the extractor
+  answers `no-currency` rather than assume USD.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Rolling Tool Chest</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "Rolling Tool Chest",
+        "sku": "CHEST-ROLL-41",
+        "offers": {
+          "@type": "Offer",
+          "url": "https://example.invalid/tools/rolling-tool-chest",
+          "price": "249.00",
+          "availability": "https://schema.org/InStock"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Rolling Tool Chest</h1>
+    <p class="price">$249.00</p>
+  </body>
+</html>

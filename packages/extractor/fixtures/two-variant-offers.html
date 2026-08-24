@@ -1,0 +1,39 @@
+<!doctype html>
+<!--
+  Fixture: two offers on one page (two variants of the same product).
+  Picking the first offer is the silent way to record a different product's
+  price forever, so the extractor answers `ambiguous-offer` and writes nothing.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Framing Nailer</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "Framing Nailer",
+        "sku": "NAIL-FRM",
+        "offers": [
+          {
+            "@type": "Offer",
+            "name": "Bare tool",
+            "price": "219.00",
+            "priceCurrency": "USD",
+            "availability": "https://schema.org/InStock"
+          },
+          {
+            "@type": "Offer",
+            "name": "Kit with battery",
+            "price": "329.00",
+            "priceCurrency": "USD",
+            "availability": "https://schema.org/InStock"
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Framing Nailer</h1>
+  </body>
+</html>

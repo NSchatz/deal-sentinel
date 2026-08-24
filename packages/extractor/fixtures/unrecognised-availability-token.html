@@ -1,0 +1,33 @@
+<!doctype html>
+<!--
+  Fixture: an availability token outside the twelve documented ItemAvailability
+  members (BackOrder, Discontinued, InStock, InStoreOnly, LimitedAvailability,
+  MadeToOrder, OnlineOnly, OutOfStock, PreOrder, PreSale, Reserved, SoldOut).
+  "ShipsInTwoToThreeWeeks" is a vendor invention. The price resolves, and the
+  token is stored exactly as received rather than collapsed to a boolean or
+  dropped for being unrecognised.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Benchtop Mortiser</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "Benchtop Mortiser",
+        "sku": "MORT-BENCH-38",
+        "offers": {
+          "@type": "Offer",
+          "url": "https://example.invalid/tools/benchtop-mortiser",
+          "price": "1,299.00",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/ShipsInTwoToThreeWeeks"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Benchtop Mortiser</h1>
+  </body>
+</html>
