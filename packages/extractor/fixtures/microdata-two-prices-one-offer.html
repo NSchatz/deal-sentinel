@@ -1,0 +1,24 @@
+<!doctype html>
+<!--
+  Fixture: ONE offer element carrying TWO different price properties - a struck
+  out was-price and the price being asked. The roadmap names this exact hazard:
+  "a strikethrough price ... is indistinguishable from a true one a week
+  later". Both values are inside the offer's own extent, so scoping alone does
+  not separate them, and they do not agree once converted, so the extractor
+  answers `ambiguous-offer` rather than take whichever came first.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Orbital Sander</title>
+  </head>
+  <body itemscope itemtype="https://schema.org/Product">
+    <h1 itemprop="name">Orbital Sander</h1>
+    <div itemprop="offers" itemscope itemtype="https://schema.org/Offer">
+      <meta itemprop="priceCurrency" content="USD" />
+      <s itemprop="price" content="249.00">$249.00</s>
+      <span itemprop="price" content="199.00">$199.00</span>
+      <link itemprop="availability" href="https://schema.org/InStock" />
+    </div>
+  </body>
+</html>

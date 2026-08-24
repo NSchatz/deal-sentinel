@@ -1,0 +1,32 @@
+<!doctype html>
+<!--
+  Fixture: ONE microdata offer, with an unrelated priced item above it in the
+  document - the "frequently bought together" accessory every retail page
+  carries. The accessory is a Product with its own price and no Offer element,
+  so this page still states exactly one offer.
+  A reader that scans every itemprop in the whole document attributes the
+  accessory's 9.99 to this listing and never reads the offer's own 349.00. The
+  properties of an offer are the ones inside that offer's element, so this
+  resolves to 34900 minor units.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Table Saw</title>
+  </head>
+  <body>
+    <aside itemscope itemtype="https://schema.org/Product">
+      <span itemprop="name">Push stick and featherboard set</span>
+      <span itemprop="price" content="9.99">$9.99</span>
+      <meta itemprop="priceCurrency" content="USD" />
+    </aside>
+    <div itemscope itemtype="https://schema.org/Product">
+      <h1 itemprop="name">Table Saw</h1>
+      <div itemprop="offers" itemscope itemtype="https://schema.org/Offer">
+        <meta itemprop="priceCurrency" content="USD" />
+        <span itemprop="price" content="349.00">$349.00</span>
+        <link itemprop="availability" href="https://schema.org/InStock" />
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,31 @@
+<!doctype html>
+<!--
+  Fixture: an offer whose price field is text no exact conversion can read.
+  schema.org's `price` has expected types "Number or Text" and its formatting
+  rules bind publishers rather than consumers, so this is markup a real site
+  emits. The extractor answers `no-price` rather than reach for a number.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Jobsite Fan</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "Jobsite Fan",
+        "sku": "FAN-JOB-20",
+        "offers": {
+          "@type": "Offer",
+          "url": "https://example.invalid/tools/jobsite-fan",
+          "price": "Call for price",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Jobsite Fan</h1>
+  </body>
+</html>

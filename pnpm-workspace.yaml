@@ -1,0 +1,18 @@
+# The workspace globs here mirror the `workspaces` field in package.json, which
+# is the workspace declaration of record (spec S0002-deal-sentinel-history-1,
+# "Layout decision": npm workspaces, `"workspaces": ["packages/*"]`). pnpm does
+# not read that field, and pnpm is the package manager this repo's build
+# environment permits, so the same globs are restated here. Neither file is
+# allowed to drift from the other.
+packages:
+  - "packages/*"
+
+# A dependency on another package in this repo resolves to the workspace copy,
+# never to a registry package of the same name. npm workspaces do this by
+# default; pnpm has to be told, which is why the cross-package version ranges
+# stay plain "*" and readable by both.
+linkWorkspacePackages: true
+
+# No dependency here needs a native build, so lifecycle scripts stay off.
+# Turning them on would be a deliberate, reviewable edit to this line.
+ignoreScripts: true

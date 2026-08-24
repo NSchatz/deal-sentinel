@@ -1,0 +1,31 @@
+<!doctype html>
+<!--
+  Fixture: an AggregateOffer stating a price range rather than one price.
+  lowPrice and highPrice differ, so there is no single offer price to record.
+  The extractor answers `ambiguous-offer`.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Cedar Fence Picket</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "Cedar Fence Picket",
+        "sku": "FENCE-CEDAR-6",
+        "offers": {
+          "@type": "AggregateOffer",
+          "offerCount": 4,
+          "lowPrice": "4.28",
+          "highPrice": "7.65",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Cedar Fence Picket</h1>
+  </body>
+</html>

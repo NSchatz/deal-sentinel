@@ -1,0 +1,20 @@
+<!doctype html>
+<!--
+  Fixture: one offer expressed as schema.org microdata rather than JSON-LD,
+  priced in GBP with a currency symbol and a thousands separator in the visible
+  text but a clean `content` attribute on the itemprop.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en-GB">
+  <head>
+    <title>Cast Iron Bench Vice</title>
+  </head>
+  <body itemscope itemtype="https://schema.org/Product">
+    <h1 itemprop="name">Cast Iron Bench Vice</h1>
+    <div itemprop="offers" itemscope itemtype="https://schema.org/Offer">
+      <meta itemprop="priceCurrency" content="GBP" />
+      <span itemprop="price" content="1250.00">&pound;1,250.00</span>
+      <link itemprop="availability" href="https://schema.org/BackOrder" />
+    </div>
+  </body>
+</html>

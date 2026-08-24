@@ -1,0 +1,32 @@
+<!doctype html>
+<!--
+  Fixture: one product, one offer, JSON-LD, USD.
+  Synthetic markup written for this test suite. Reduced to the offer markup
+  under test: this file carries no review body, no reviewer name and no account
+  identifier, and no fixture in this directory ever will.
+-->
+<html lang="en">
+  <head>
+    <title>18V Cordless Drill Kit</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "18V Cordless Drill Kit",
+        "sku": "DRL-18V-KIT",
+        "offers": {
+          "@type": "Offer",
+          "url": "https://example.invalid/tools/drill-18v-kit",
+          "price": "129.99",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock",
+          "priceValidUntil": "2026-12-31"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>18V Cordless Drill Kit</h1>
+    <p class="price">$129.99</p>
+  </body>
+</html>

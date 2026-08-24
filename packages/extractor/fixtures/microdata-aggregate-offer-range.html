@@ -1,0 +1,23 @@
+<!doctype html>
+<!--
+  Fixture: an AggregateOffer in microdata whose ends differ - four sellers
+  between 79.00 and 149.00. That is a range, not one offer price, so the
+  extractor answers `ambiguous-offer`, the same answer its JSON-LD twin
+  `aggregate-offer-range.html` gets. The two readers agree on purpose: a
+  dialect must not change the verdict on the same page.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Router Bit Set</title>
+  </head>
+  <body itemscope itemtype="https://schema.org/Product">
+    <h1 itemprop="name">Router Bit Set</h1>
+    <div itemprop="offers" itemscope itemtype="https://schema.org/AggregateOffer">
+      <meta itemprop="priceCurrency" content="USD" />
+      <meta itemprop="lowPrice" content="79.00" />
+      <meta itemprop="highPrice" content="149.00" />
+      <meta itemprop="offerCount" content="4" />
+    </div>
+  </body>
+</html>

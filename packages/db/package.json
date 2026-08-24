@@ -1,0 +1,22 @@
+{
+  "name": "@deal-sentinel/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The price history store: schema, migrations, the guarded write path, the one-time initialization action, the start-up check, and the backup and restore scripts.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "bin": {
+    "history-init": "./src/cli/init.ts",
+    "history-start-check": "./src/cli/start-check.ts"
+  },
+  "dependencies": {
+    "@deal-sentinel/shared": "*",
+    "drizzle-orm": "0.38.3",
+    "pg": "8.13.1"
+  }
+}

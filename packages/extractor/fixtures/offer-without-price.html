@@ -1,0 +1,30 @@
+<!doctype html>
+<!--
+  Fixture: an offer that states no resolvable price at all.
+  The offer node exists and names a currency, but carries no price field. The
+  extractor answers `no-price` and the write path records nothing.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Contractor Table Saw</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "Contractor Table Saw",
+        "sku": "SAW-TBL-CONTR",
+        "offers": {
+          "@type": "Offer",
+          "url": "https://example.invalid/tools/contractor-table-saw",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStoreOnly"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Contractor Table Saw</h1>
+    <p class="price">Call for price</p>
+  </body>
+</html>

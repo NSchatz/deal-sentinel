@@ -1,0 +1,31 @@
+<!doctype html>
+<!--
+  Fixture: one product, one offer, JSON-LD, KWD.
+  The Kuwaiti dinar has an ISO 4217 minor-unit exponent of 3, so 12.995 dinars
+  is 12995 fils. The other direction from the JPY fixture: a fixed
+  multiply-by-100 would either round this price away or record it as 1300.
+  Synthetic markup. No review body, no reviewer name, no account identifier.
+-->
+<html lang="en">
+  <head>
+    <title>Carbide Router Bit Set</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "Carbide Router Bit Set",
+        "sku": "RTR-BIT-SET",
+        "offers": {
+          "@type": "Offer",
+          "url": "https://example.invalid/tools/router-bit-set",
+          "price": "12.995",
+          "priceCurrency": "KWD",
+          "availability": "https://schema.org/LimitedAvailability"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Carbide Router Bit Set</h1>
+  </body>
+</html>
