@@ -1,0 +1,22 @@
+{
+  "name": "@deal-sentinel/governor",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The one fetch chokepoint: per-host ceilings with a randomised delay, the robots.txt gate, back-pressure, the per-source breaker, and central allowance accounting. Nothing else in this repo may reach an HTTP client.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./no-direct-http": "./src/no-direct-http.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "bin": {
+    "governor-start-check": "./src/cli/start-check.ts"
+  },
+  "dependencies": {
+    "@deal-sentinel/db": "*",
+    "@deal-sentinel/shared": "*",
+    "drizzle-orm": "0.38.3",
+    "pg": "8.13.1"
+  }
+}

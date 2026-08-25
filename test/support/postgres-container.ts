@@ -48,6 +48,30 @@ export function dockerAvailable(): boolean {
   return process.env.HISTORY_TEST_SKIP_DOCKER !== "1";
 }
 
+/**
+ * Whether this machine's Docker can actually START a container, answered by
+ * starting one.
+ *
+ * `docker version` is not the question: a daemon can answer that and still hang
+ * forever on `docker run`, which is what a sandboxed environment without the
+ * kernel features a container needs does. A suite that asks the wrong question
+ * waits for a hook timeout and reports a failure that is not about the code, so
+ * this one asks the right question with a short deadline and lets the caller
+ * skip honestly.
+ */
+export async function dockerCanRunContainers(timeoutMs = 20_000): Promise<boolean> {
+  if (!dockerAvailable()) return false;
+  try {
+    await execFile("docker", ["run", "--rm", POSTGRES_IMAGE, "true"], {
+      timeout: timeoutMs,
+      killSignal: "SIGKILL",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 let counter = 0;
 
 /**

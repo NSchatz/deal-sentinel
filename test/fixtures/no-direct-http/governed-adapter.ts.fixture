@@ -1,0 +1,23 @@
+// The same adapter, written the way this repository requires: it takes a
+// Governor and asks it. The governor applies the destination host's configured
+// ceiling and a randomised delay, decides the path against that host's
+// robots.txt, honours any back-pressure hold, consults the source's breaker and
+// counts the request against the source's allowance.
+//
+// The check must PASS this file. A check that rejects everything is not a
+// check; it is an outage.
+
+import type { Governor } from "@deal-sentinel/governor";
+
+export async function currentPrice(
+  governor: Governor,
+  listingUrl: string,
+): Promise<string | null> {
+  const outcome = await governor.request({
+    url: listingUrl,
+    sourceId: "jsonld-generic",
+    headers: { accept: "text/html" },
+  });
+  if (!outcome.ok) return null;
+  return outcome.response.body;
+}

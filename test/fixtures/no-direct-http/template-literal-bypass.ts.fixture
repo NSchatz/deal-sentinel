@@ -1,0 +1,6 @@
+// A bypass hidden in a template literal's interpolation. The check reads
+// string and template contents rather than blanking them, so this is still a
+// call site: an interpolation runs.
+
+export const value = (url: string): Promise<unknown> =>
+  Promise.resolve(`${fetch(url)}`);

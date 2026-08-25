@@ -18,7 +18,7 @@ performed.
 
 ## What exists
 
-TypeScript on Node, PostgreSQL, Drizzle. Three packages behind
+TypeScript on Node, PostgreSQL, Drizzle. Four packages behind
 `"workspaces": ["packages/*"]`:
 
 - `packages/shared` - the cross-package types (`ExtractionResult`,
@@ -33,10 +33,60 @@ TypeScript on Node, PostgreSQL, Drizzle. Three packages behind
   prices refuses in both. Its fixtures live beside it in `fixtures/`, committed
   as files, reduced to the offer markup under test: no review body, no reviewer
   name, no account identifier, ever.
-- `packages/db` - the price observation table and its first migration, the write
+- `packages/db` - the price observation table and its migrations, the write
   path (which takes an `ExtractionResult` and writes nothing at all when it is a
-  failure), the one-time initialization action, the start-up check, and the
-  backup and restore scripts.
+  failure), the one-time initialization action, the start-up check, the backup
+  and restore scripts, and the governor's durable allowance counter.
+- `packages/governor` - the one fetch chokepoint. Every outbound HTTP request
+  this system will ever make goes through `Governor.request`, which applies the
+  destination host's configured ceiling and a randomised delay, decides the path
+  against that host's `robots.txt`, honours `Retry-After` in both legal forms,
+  breaks a failing source rather than hammering it, and counts every request
+  that leaves against that source's allowance. Exactly one module in this
+  repository may reach an HTTP client, and
+  `test/unit/no-direct-http.test.ts` fails the suite if a second one appears.
+
+## The governor, and why it exists before the second source does
+
+`BRIEF.md` constraint 4 is "personal-use volumes ... Part of the point is
+keeping the household's home IP in good standing". A block earned against a
+residential address is shared by everyone in the house, a burned free allowance
+does not come back, and no re-run undoes either. So the request path is one
+place, and it is where every rule lives:
+
+- **A ceiling per host, and a randomised delay on every release.** A host with
+  no configured ceiling is REFUSED. There is no default-permissive rate and no
+  built-in number anywhere in the package.
+- **`robots.txt`, with the asymmetry the standard specifies.** A 404 means the
+  host carries no rules and may be fetched (RFC 9309 2.3.1.3). A 500, a timeout
+  or a connection failure means the file is undefined and the host is COMPLETELY
+  DISALLOWED (2.3.1.4). Decisions are cached, bounded by configuration that may
+  not exceed 24 hours (2.4), and the file is parsed up to a limit that may not
+  be configured below 500 KiB (2.5).
+- **Back-pressure, both legal forms.** `Retry-After: 120` and
+  `Retry-After: Fri, 31 Dec 1999 23:59:59 GMT` are both read (RFC 9110 10.2.3).
+  A 429 with no header, a value that will not parse, or one naming an instant
+  already past all take the configured back-off - never an immediate retry.
+- **A breaker per source.** A source whose error-or-block rate crosses its
+  configured threshold is paused for its configured interval and notified once;
+  every other source keeps running.
+- **An allowance per metered source**, counted centrally, warned once at the
+  configured fraction, stopped (not slowed) at the allowance, and stored in
+  PostgreSQL so a crash loop inside a period resumes the count instead of
+  spending it twice.
+
+Configuration lives in `config/governor.json` and every value in it is required:
+absent, unparseable or incomplete configuration makes the process refuse to
+start, naming the key.
+
+```sh
+pnpm governor:start-check              # reads config/governor.json, or refuses
+pnpm governor:start-check path/to.json
+```
+
+The numbers in the committed file are conservative and UNVALIDATED, and the file
+says so. `BRIEF.md` fixes no rate ceiling and neither does this phase: what is
+proved here is that the ceilings are ENFORCED, not that they are right.
 
 ## Running it
 
@@ -53,6 +103,15 @@ performed restore, so `test/integration/restore-proof.test.ts` seeds a real
 database from the fixtures, dumps it with `pg_dump`, destroys the container AND
 its named volume, brings up a fresh one, restores with `pg_restore`, and
 compares every observation row for row.
+`test/integration/governor-allowance-restart.test.ts` is the same idea for the
+allowance counter: it spends part of a period through one governor, throws that
+process away, and asserts the next one continues the count.
+
+The whole suite reaches nothing outside the loopback interface. Every robots,
+back-pressure and breaker case runs against a stub HTTP server this suite starts
+on 127.0.0.1, and the local PostgreSQL container is the only other endpoint any
+test touches. No test reaches a real retailer, on purpose: proving a rule about
+third parties by bothering one would be the defect these rules exist to prevent.
 
 ## Starting the history database
 

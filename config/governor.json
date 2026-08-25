@@ -1,0 +1,99 @@
+{
+  "_comment": [
+    "THE NUMBERS IN THIS FILE ARE CONSERVATIVE AND UNVALIDATED.",
+    "BRIEF.md deliberately fixes no rate ceiling, no threshold and no cooldown,",
+    "and CLAUDE.md rule 8 forbids inventing one and then treating it as decided.",
+    "Every value here exists so that a ceiling EXISTS and is enforced; none of",
+    "them has been checked against a real source's behaviour, because at this",
+    "phase this repository fetches no real source. Change them deliberately, in",
+    "a commit that says why, and never upwards against an anti-bot-protected",
+    "target without the owner (BRIEF.md constraint 7).",
+    "Keys beginning with an underscore are comments and are ignored by the",
+    "loader. Every other key is required: the governor has no built-in default",
+    "and refuses to start on a file that is missing one."
+  ],
+
+  "userAgent": "deal-sentinel/0.1 (+https://github.com/NSchatz/deal-sentinel)",
+
+  "http": {
+    "_comment": "Per-request timeout, and the cap on how much of a response body enters this process.",
+    "requestTimeoutMs": 15000,
+    "maxResponseBytes": 2097152
+  },
+
+  "hosts": {
+    "_comment": [
+      "One entry per hostname this system may contact, keyed by the lower-case",
+      "hostname without a port. A host with no entry here is REFUSED: there is",
+      "no default-permissive rate anywhere in the governor.",
+      "127.0.0.1 is the only host this repository contacts today - the test",
+      "harness's stub server and the local Postgres container are on it - and",
+      "loopback is owed no politeness, which is why its numbers are loose.",
+      "SOURCE-3 adds the first real host together with the ceiling that source's",
+      "own published terms and BRIEF.md constraint 4 justify."
+    ],
+    "127.0.0.1": {
+      "maxRequests": 240,
+      "intervalMs": 60000,
+      "minDelayMs": 1,
+      "jitterMs": 1
+    }
+  },
+
+  "robots": {
+    "_comment": [
+      "productToken is what a robots.txt user-agent line is matched against,",
+      "case-insensitively (RFC 9309 2.2.1).",
+      "cacheBoundMs may not exceed 86400000: RFC 9309 2.4 says a crawler SHOULD",
+      "NOT use a cached robots.txt for more than 24 hours. Six hours is chosen",
+      "below the ceiling so a host that ADDS a disallow rule is obeyed sooner;",
+      "one extra robots request per host per six hours is not a politeness cost.",
+      "parsingLimitBytes may not fall below 512000: RFC 9309 2.5 says the",
+      "parsing limit MUST be at least 500 kibibytes."
+    ],
+    "productToken": "deal-sentinel",
+    "cacheBoundMs": 21600000,
+    "parsingLimitBytes": 512000
+  },
+
+  "backPressure": {
+    "_comment": [
+      "How long a host is held after a 429 that carries no Retry-After, and",
+      "after a Retry-After this system could not read or that named an instant",
+      "already past. A host that says 'too many requests' and nothing else is",
+      "asking for a lot less traffic, so this is deliberately long."
+    ],
+    "defaultBackoffMs": 900000
+  },
+
+  "breaker": {
+    "_comment": [
+      "The default per-source breaker. A source may override it under",
+      "sources.<id>.breaker. failureRateThreshold is the error-or-block rate,",
+      "in (0, 1], at which the source is paused; minimumOutcomes is how many",
+      "outcomes must be inside the window before that rate means anything."
+    ],
+    "windowMs": 900000,
+    "minimumOutcomes": 5,
+    "failureRateThreshold": 0.5,
+    "pauseMs": 3600000
+  },
+
+  "sources": {
+    "_comment": [
+      "One entry per adapter that may ask the governor for anything. A source",
+      "that is not listed here is REFUSED, because its breaker settings and its",
+      "allowance would otherwise be unknown.",
+      "A METERED source adds an allowance block:",
+      "  \"allowance\": { \"limit\": <requests per period>, \"periodMs\": <period>,",
+      "                  \"warnFraction\": <0..1> }",
+      "and the limit comes from THAT source's own published terms. No such",
+      "number is written here: this phase fetches no real source, and SOURCE-3",
+      "is where the sanctioned API's published allowance is read and adopted.",
+      "The two source ids below are the ones packages/shared already names on",
+      "the observation context."
+    ],
+    "bestbuy-api": {},
+    "jsonld-generic": {}
+  }
+}

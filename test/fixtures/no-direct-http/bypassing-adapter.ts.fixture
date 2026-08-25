@@ -1,0 +1,13 @@
+// A retailer adapter that reaches the network itself. This is the exact shape
+// the governor exists to make unreachable: no ceiling, no delay, no robots
+// decision, no allowance - just a request leaving the household's IP.
+//
+// Committed with a `.fixture` extension so the repository-wide scan does not
+// read it as source; `test/unit/no-direct-http.test.ts` hands its TEXT to the
+// same check under a synthetic path and asserts the check rejects it.
+
+export async function currentPrice(listingUrl: string): Promise<number> {
+  const response = await fetch(listingUrl, { headers: { accept: "text/html" } });
+  const markup = await response.text();
+  return markup.length;
+}
