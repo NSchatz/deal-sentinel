@@ -26,7 +26,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
 import {
-  createFetchTransport,
+  LIVE_TRANSPORT,
   decidePath,
   matchesPattern,
   normalisePath,
@@ -111,7 +111,7 @@ describe("the rules of the group that applies decide every fetch", () => {
   for (const [path, allowed, why] of cases) {
     it(`${allowed ? "fetches" : "refuses"} ${path}: ${why}`, async () => {
       const { governor } = buildGovernor({
-        transport: createFetchTransport(),
+        transport: LIVE_TRANSPORT,
         clock: new FakeClock(),
         config: config(),
       });
@@ -159,7 +159,7 @@ describe("the star group applies when no group names this fetcher", () => {
 
   it("obeys the star group's disallow", async () => {
     const { governor } = buildGovernor({
-      transport: createFetchTransport(),
+      transport: LIVE_TRANSPORT,
       clock: new FakeClock(),
       config: config(),
     });
@@ -173,7 +173,7 @@ describe("the star group applies when no group names this fetcher", () => {
 
   it("does not obey a group that names somebody else", async () => {
     const { governor } = buildGovernor({
-      transport: createFetchTransport(),
+      transport: LIVE_TRANSPORT,
       clock: new FakeClock(),
       config: config(),
     });
@@ -218,7 +218,7 @@ describe("a robots.txt larger than the parsing limit is truncated, not rejected"
 
   it("obeys a rule inside the limit and does not treat the host as unreachable", async () => {
     const { governor } = buildGovernor({
-      transport: createFetchTransport(),
+      transport: LIVE_TRANSPORT,
       clock: new FakeClock(),
       config: config(limit),
     });
@@ -244,7 +244,7 @@ describe("a robots.txt larger than the parsing limit is truncated, not rejected"
 
   it("does not obey a rule that fell beyond the limit", async () => {
     const { governor } = buildGovernor({
-      transport: createFetchTransport(),
+      transport: LIVE_TRANSPORT,
       clock: new FakeClock(),
       config: config(limit),
     });

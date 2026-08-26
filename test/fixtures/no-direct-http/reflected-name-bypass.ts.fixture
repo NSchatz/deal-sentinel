@@ -1,0 +1,15 @@
+// The name as data rather than as code: looked up through Reflect, and looked
+// up through a bracket access split over two lines so that no single line
+// carries the whole `[".."]` shape. Neither is a sentence anybody writes, and
+// both are the same ungoverned request.
+
+const send = Reflect.get(globalThis, "fetch") as typeof globalThis.fetch;
+
+const alsoSend = globalThis[
+  "fetch"
+];
+
+export async function currentPrice(listingUrl: string): Promise<number> {
+  const response = await (send ?? alsoSend)(listingUrl);
+  return (await response.text()).length;
+}

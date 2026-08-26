@@ -81,6 +81,28 @@ export type HttpTransport = {
   send(request: TransportRequest): Promise<TransportResponse>;
 };
 
+/**
+ * What a caller writes when it wants the governor to use the real HTTP client.
+ *
+ * It is a MARKER, not a transport: it has no `send`, so holding it sends
+ * nothing, and there is no way to turn it into a client except by handing it to
+ * a `Governor`, which does so behind all six gates. That is the whole reason it
+ * exists. An earlier shape of this package exported the factory itself, and a
+ * caller could import that one name, call it, and issue a real request with no
+ * ceiling, no delay, no robots decision, no back-pressure, no breaker and no
+ * allowance. The factory is now internal to the package, and
+ * `no-direct-http.ts` reports any file outside the governor that names it.
+ */
+export const LIVE_TRANSPORT: unique symbol = Symbol.for(
+  "@deal-sentinel/governor#live-transport",
+);
+
+/**
+ * Either a transport the caller supplies (every test that wants to assert on
+ * what was sent without sending it) or the marker above.
+ */
+export type TransportChoice = HttpTransport | typeof LIVE_TRANSPORT;
+
 /** The wall clock and `Math.random`, for production wiring only. */
 export const systemClock: Clock = {
   now: () => Date.now(),

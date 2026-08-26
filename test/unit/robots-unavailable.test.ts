@@ -22,7 +22,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { createFetchTransport } from "@deal-sentinel/governor";
+import { LIVE_TRANSPORT } from "@deal-sentinel/governor";
 
 import { reply, routes, startLoopbackServer } from "../support/loopback-server.ts";
 import type { LoopbackServer } from "../support/loopback-server.ts";
@@ -62,7 +62,7 @@ describe("a host with no robots.txt carries no rules", () => {
 
   it("allows the fetch after a 404", async () => {
     const { governor } = buildGovernor({
-      transport: createFetchTransport(),
+      transport: LIVE_TRANSPORT,
       clock: new FakeClock(),
       config: config(),
     });
@@ -82,7 +82,7 @@ describe("a host with no robots.txt carries no rules", () => {
   it("still applies the host's ceiling and its randomised delay", async () => {
     const clock = new FakeClock(0);
     const { governor } = buildGovernor({
-      transport: createFetchTransport(),
+      transport: LIVE_TRANSPORT,
       clock,
       random: sequenceRandom([0.2, 0.8]),
       config: config(),
@@ -105,7 +105,7 @@ describe("a host with no robots.txt carries no rules", () => {
   it("holds a second page behind the ceiling even with no rules to obey", async () => {
     const clock = new FakeClock(0);
     const { governor } = buildGovernor({
-      transport: createFetchTransport(),
+      transport: LIVE_TRANSPORT,
       clock,
       random: sequenceRandom([0]),
       // Two releases per ten seconds: robots and one page fill it.
@@ -143,7 +143,7 @@ describe("the other 4xx answers are the same case", () => {
       );
       try {
         const { governor } = buildGovernor({
-          transport: createFetchTransport(),
+          transport: LIVE_TRANSPORT,
           clock: new FakeClock(),
           config: config(),
         });

@@ -64,7 +64,7 @@ export type { RobotsFile, RobotsGroup, RobotsRule, RobotsVerdict } from "./robot
 export { holdForResponse, readRetryAfter } from "./retry-after.ts";
 export type { RetryAfterReading } from "./retry-after.ts";
 
-export { nullNotifier, systemClock, systemRandom } from "./ports.ts";
+export { LIVE_TRANSPORT, nullNotifier, systemClock, systemRandom } from "./ports.ts";
 export type {
   Clock,
   HttpTransport,
@@ -72,11 +72,18 @@ export type {
   NotificationKind,
   Notifier,
   RandomSource,
+  TransportChoice,
   TransportRequest,
   TransportResponse,
 } from "./ports.ts";
 
-export { createFetchTransport } from "./transport.ts";
+// The factory that builds a live HTTP transport is DELIBERATELY not here.
+// Exporting it published an ungoverned way out of the process: one import, one
+// call, and a real request left the household's IP with no ceiling, no delay,
+// no robots decision, no back-pressure, no breaker and no allowance. A caller
+// that wants the real client asks for `LIVE_TRANSPORT` and hands it to a
+// `Governor`, which is the only thing that can redeem it, and only behind all
+// six gates. `no-direct-http.ts` reports any file that reaches around this.
 
 export {
   DEFAULT_CONFIG_PATH,
@@ -89,7 +96,15 @@ export {
   HTTP_CLIENT_ALLOWLIST,
   collectSourceFiles,
   describeFindings,
+  describeRules,
   findDirectHttpCallSites,
+  maskStringLiterals,
+  normaliseComputedAccess,
   stripComments,
 } from "./no-direct-http.ts";
-export type { AllowlistEntry, DirectHttpFinding, SourceFile } from "./no-direct-http.ts";
+export type {
+  AllowlistEntry,
+  DirectHttpFinding,
+  ScanTarget,
+  SourceFile,
+} from "./no-direct-http.ts";

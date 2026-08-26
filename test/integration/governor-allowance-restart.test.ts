@@ -24,7 +24,7 @@ import pg from "pg";
 import { createDatabase, initializeHistory } from "@deal-sentinel/db";
 import {
   Governor,
-  createFetchTransport,
+  LIVE_TRANSPORT,
   createPostgresAllowanceStore,
   periodStartFor,
 } from "@deal-sentinel/governor";
@@ -126,7 +126,7 @@ function startProcess(clock: FakeClock): {
     config: config(),
     clock,
     random: sequenceRandom([0.5]),
-    transport: createFetchTransport(),
+    transport: LIVE_TRANSPORT,
     notifier,
     allowanceStore: store,
   });

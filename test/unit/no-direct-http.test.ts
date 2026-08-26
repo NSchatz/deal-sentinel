@@ -6,15 +6,24 @@
  *   as part of `pnpm run test`.
  *
  * Graded by proving UNREACHABILITY and not present-day absence. A check that
- * can only pass proves nothing, so this file does three things in this order:
+ * can only pass proves nothing, so this file does four things in this order:
  *
  *   1. runs the check over committed fixture call sites that bypass the
  *      governor and asserts it REJECTS them - a bare `fetch(`, a second client
- *      imported and used, and one hidden in a template literal;
- *   2. runs it over a fixture that goes through the governor and over one that
- *      only TALKS about bypasses in comments, and asserts it accepts both, so
- *      the check is not simply refusing everything;
- *   3. runs it over the repository as it stands and asserts no findings.
+ *      imported and used, one hidden in a template literal, and every way the
+ *      SAME global client can be resolved under another name: through `global`,
+ *      through a bracket property, through a local alias of the global object,
+ *      through a renamed destructure, and as a value with no call attached;
+ *   2. runs it over fixtures that reach the network the supported way - one
+ *      that asks a Governor, one that asks for the `LIVE_TRANSPORT` marker -
+ *      and over ones that only TALK about bypasses in comments and in strings,
+ *      and asserts it accepts all of them, so the check is not simply refusing
+ *      everything;
+ *   3. runs it over fixtures that reach this package's OWN ungoverned
+ *      transport, by the public name it used to carry and by a deep import of
+ *      the module it lives in, and asserts both are rejected;
+ *   4. runs it over the repository as it stands and asserts no findings, and
+ *      asserts that the public surface hands out nothing that can send.
  *
  * Every offending sample lives in `test/fixtures/no-direct-http/` with a
  * `.fixture` extension, for two reasons: the repository-wide scan does not read
@@ -29,11 +38,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
+import * as governor from "@deal-sentinel/governor";
 import {
   HTTP_CLIENT_ALLOWLIST,
   collectSourceFiles,
   describeFindings,
   findDirectHttpCallSites,
+  maskStringLiterals,
+  normaliseComputedAccess,
   stripComments,
 } from "@deal-sentinel/governor";
 import type { SourceFile } from "@deal-sentinel/governor";
@@ -108,6 +120,154 @@ describe("the check rejects a call site that bypasses the governor", () => {
   });
 });
 
+/**
+ * The finding this suite exists to make impossible a second time: the check
+ * used to enumerate the global names the client could be reached through, and
+ * every name it had not thought of walked straight past it. `global`,
+ * `globalThis["..."]`, a local alias and a renamed destructure all resolve to
+ * the identical function, and each of them skips the host ceiling, the
+ * randomised delay, the robots decision, the back-pressure hold, the breaker
+ * and the allowance in one step, from an address the whole household shares.
+ */
+describe("the check treats any resolution of the client identifier as a call site", () => {
+  const bypasses: [string, string][] = [
+    ["`global`, which is Node's own alias for globalThis", "global-alias-bypass.ts.fixture"],
+    ["a bracket property on globalThis", "bracket-access-bypass.ts.fixture"],
+    ["a one-line alias of the global object", "aliased-global-bypass.ts.fixture"],
+    ["a renamed destructure", "renamed-destructure-bypass.ts.fixture"],
+    ["the identifier as a value, with no call attached", "value-alias-bypass.ts.fixture"],
+  ];
+
+  for (const [what, file] of bypasses) {
+    it(`rejects one reached through ${what}`, () => {
+      const findings = findDirectHttpCallSites([
+        fixture(file, "packages/adapters/src/retailer.ts"),
+      ]);
+      assert.ok(
+        findings.length > 0,
+        `${file} reaches the network outside the governor and the check reported nothing`,
+      );
+      assert.ok(
+        findings.some((finding) => finding.rule === "fetch-call"),
+        `${file} was reported, but not as a direct client call`,
+      );
+    });
+  }
+
+  it("rejects the name looked up as data, through Reflect or across two lines", () => {
+    const findings = findDirectHttpCallSites([
+      fixture("reflected-name-bypass.ts.fixture", "packages/adapters/src/reflected.ts"),
+    ]);
+    assert.ok(
+      findings.some((finding) => finding.rule === "client-name-literal"),
+      "the client's name spelled as a string was not reported, so a property " +
+        "lookup that never writes the identifier walks past the check",
+    );
+    // Both shapes, on their own lines: the Reflect lookup and the split bracket.
+    assert.deepEqual(
+      findings
+        .filter((finding) => finding.rule === "client-name-literal")
+        .map((finding) => finding.line),
+      [6, 9],
+    );
+  });
+
+  it("does not mistake the word in prose, a title or a package name for one", () => {
+    // The other half of the property. Over-reporting is not the safe direction
+    // here: a check that fires on a test name is a check somebody deletes.
+    const findings = findDirectHttpCallSites([
+      fixture("prose-mentions.ts.fixture", "packages/adapters/src/prose.ts"),
+    ]);
+    assert.deepEqual(findings, [], describeFindings(findings));
+  });
+
+  it("blanks string contents for the code view but keeps interpolations, which run", () => {
+    const masked = maskStringLiterals('const a = "one two"; const b = `x${y}z`;');
+    assert.doesNotMatch(masked, /one two/);
+    assert.match(masked, /\$\{y\}/);
+    // Offsets survive, which is what keeps the two views line-for-line aligned.
+    assert.equal(masked.length, 'const a = "one two"; const b = `x${y}z`;'.length);
+  });
+
+  it("rewrites a computed access with a literal key into the dotted access it is", () => {
+    // The identifier is assembled at run time and the expectation is built from
+    // the same fragments, so that no line of THIS file is a call site the
+    // repository-wide scan would have to be taught to ignore.
+    const identifier = "fet" + "ch";
+    const source = `globalThis[${JSON.stringify(identifier)}](url)`;
+
+    const rewritten = normaliseComputedAccess(source);
+
+    assert.match(rewritten, new RegExp("globalThis\\." + identifier));
+    // Same length, so the code view stays aligned with the readable one.
+    assert.equal(rewritten.length, source.length);
+  });
+});
+
+/**
+ * The second finding: the package used to export the factory that builds a
+ * live client. One import of the governor's own public API and a caller had a
+ * real, ungoverned request, with the check reporting nothing about it.
+ */
+describe("the check rejects a call site that reaches this package's own transport", () => {
+  it("rejects the factory reached by the name it used to be exported under", () => {
+    const findings = findDirectHttpCallSites([
+      fixture("transport-factory-bypass.ts.fixture", "packages/adapters/src/retailer.ts"),
+    ]);
+    assert.ok(
+      findings.some((finding) => finding.rule === "ungoverned-transport"),
+      "an adapter that names the ungoverned transport factory was not reported",
+    );
+  });
+
+  it("rejects a deep import that reaches past the package entry point", () => {
+    const findings = findDirectHttpCallSites([
+      fixture("transport-deep-import-bypass.ts.fixture", "packages/adapters/src/deep.ts"),
+    ]);
+    const rules = new Set(findings.map((finding) => finding.rule));
+    assert.ok(rules.has("transport-import"), "the import of the transport module was missed");
+    assert.ok(rules.has("ungoverned-transport"), "the factory call itself was missed");
+  });
+
+  it("accepts an adapter that asks for the live transport the supported way", () => {
+    const findings = findDirectHttpCallSites([
+      fixture("governed-live-adapter.ts.fixture", "packages/adapters/src/live.ts"),
+    ]);
+    assert.deepEqual(findings, [], describeFindings(findings));
+  });
+});
+
+describe("the package's public surface hands out nothing that can send", () => {
+  it("exports no factory for an ungoverned transport", () => {
+    // Present-day absence is not the property; the check above is. This is the
+    // other half: the name a caller would reach for is simply not there.
+    assert.equal(
+      Object.keys(governor).some((name) => /Transport$/.test(name) && /^create/.test(name)),
+      false,
+      `the governor package exports ${Object.keys(governor).join(", ")}`,
+    );
+  });
+
+  it("exports no value carrying a send method", () => {
+    for (const [name, value] of Object.entries(governor)) {
+      if (typeof value !== "object" || value === null) continue;
+      assert.equal(
+        typeof (value as { send?: unknown }).send,
+        "undefined",
+        `${name} is exported and can send; only Governor.request may`,
+      );
+    }
+  });
+
+  it("gives LIVE_TRANSPORT no send of its own", () => {
+    assert.equal(typeof governor.LIVE_TRANSPORT, "symbol");
+    assert.equal(
+      (governor.LIVE_TRANSPORT as unknown as { send?: unknown }).send,
+      undefined,
+    );
+  });
+});
+
 describe("the check accepts a call site that goes through the governor", () => {
   it("finds nothing in an adapter that asks the governor", () => {
     const findings = findDirectHttpCallSites([
@@ -162,14 +322,34 @@ describe("the tree as it stands has exactly one way out of the process", () => {
     );
   });
 
-  it("keeps the allowlist to the transport and the loopback stub server", () => {
+  it("keeps the allowlist to the transport, the chokepoint and the loopback stub server", () => {
     assert.deepEqual(
       HTTP_CLIENT_ALLOWLIST.map((entry) => entry.path),
-      ["packages/governor/src/transport.ts", "test/support/loopback-server.ts"],
+      [
+        "packages/governor/src/transport.ts",
+        "packages/governor/src/governor.ts",
+        "test/support/loopback-server.ts",
+      ],
     );
     for (const entry of HTTP_CLIENT_ALLOWLIST) {
       assert.ok(entry.why.length > 0, `${entry.path} is allowlisted without a reason`);
       assert.ok(entry.rules.length > 0, `${entry.path} is allowlisted for no rule`);
     }
+  });
+
+  it("lets exactly one file name an HTTP client and send with it", () => {
+    // The count that matters. `governor.ts` is on the list for the two rules
+    // about this package's OWN transport - it redeems the marker - and for no
+    // client rule; `loopback-server.ts` may import `node:http` because it
+    // serves and never sends. One file, and one only, may reach a client.
+    const senders = HTTP_CLIENT_ALLOWLIST.filter(
+      (entry) =>
+        entry.rules.includes("fetch-call") || entry.rules.includes("client-request-call"),
+    );
+    assert.deepEqual(
+      senders.map((entry) => entry.path),
+      ["packages/governor/src/transport.ts"],
+      "a second file may reach an HTTP client, so the governor is not a chokepoint",
+    );
   });
 });

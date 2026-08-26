@@ -55,8 +55,19 @@ export function readRetryAfter(value: string, receivedAtMs: number): RetryAfterR
 }
 
 /**
- * The hold a response earns: the header where it is readable and in the future,
- * the configured back-off in every other case the caller asks about.
+ * The hold a response earns: the header where it is readable, in the future and
+ * not zero, and the configured back-off in every other case the caller asks
+ * about.
+ *
+ * `readRetryAfter` above stays faithful to RFC 9110, which makes
+ * `Retry-After: 0` a legal `delay-seconds` value meaning "now". THIS function
+ * is the policy layer, and it refuses that reading for the same reason ruling
+ * R4 refuses an already-past date: the host that sent the header is the host
+ * asking for less traffic, and a hold of zero would make a 429 that names a
+ * value STRICTLY more aggressive than the same 429 with no header at all, which
+ * cannot be what either the standard or this repository means. A confident
+ * wrong answer in the direction of more requests is the one this package is not
+ * allowed to give.
  */
 export function holdForResponse(
   status: number,
@@ -66,10 +77,19 @@ export function holdForResponse(
 ): { holdMs: number; reason: string } | null {
   if (retryAfterHeader !== undefined) {
     const reading = readRetryAfter(retryAfterHeader, receivedAtMs);
-    if (reading.holdMs !== null) {
+    if (reading.holdMs !== null && reading.holdMs > 0) {
       return {
         holdMs: reading.holdMs,
         reason: `Retry-After (${reading.form}) asked for ${reading.holdMs}ms`,
+      };
+    }
+    if (reading.holdMs !== null) {
+      return {
+        holdMs: defaultBackoffMs,
+        reason:
+          `Retry-After (${reading.form}) asked for ${reading.holdMs}ms, which ` +
+          "is no wait at all, so the configured back-off of " +
+          `${defaultBackoffMs}ms applies instead`,
       };
     }
     return {

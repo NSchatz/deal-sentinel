@@ -15,9 +15,8 @@ import { loadGovernorConfig } from "./config.ts";
 import type { GovernorConfig } from "./config.ts";
 import { Governor } from "./governor.ts";
 import type { AllowanceStore } from "./allowance.ts";
-import { nullNotifier, systemClock, systemRandom } from "./ports.ts";
+import { LIVE_TRANSPORT, nullNotifier, systemClock, systemRandom } from "./ports.ts";
 import type { Clock, Notifier, RandomSource } from "./ports.ts";
-import { createFetchTransport } from "./transport.ts";
 
 /**
  * The committed configuration file. Its numbers are conservative and
@@ -72,7 +71,10 @@ export function createSystemGovernor(options: {
     config,
     clock: options.clock ?? systemClock,
     random: options.random ?? systemRandom,
-    transport: createFetchTransport(),
+    // The marker, not a client: production wiring asks for the real transport
+    // the same way anything else does, and the governor is the only thing that
+    // can turn the ask into a socket.
+    transport: LIVE_TRANSPORT,
     notifier: options.notifier ?? nullNotifier,
     allowanceStore: options.allowanceStore,
   });

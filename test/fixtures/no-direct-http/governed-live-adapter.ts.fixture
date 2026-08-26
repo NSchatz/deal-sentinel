@@ -1,0 +1,24 @@
+// An adapter that wants the REAL HTTP client and is still fully governed: it
+// asks for the marker and hands it to a Governor. The marker has no `send`, so
+// holding it sends nothing, and the governor is the only thing that can redeem
+// it - behind the host ceiling, the randomised delay, the robots decision, the
+// back-pressure hold, the breaker and the allowance.
+//
+// The check must PASS this file. If it did not, the only supported way to reach
+// the network would itself be a finding, and the check would be an outage.
+
+import { Governor, LIVE_TRANSPORT, nullNotifier } from "@deal-sentinel/governor";
+import type { AllowanceStore, GovernorConfig } from "@deal-sentinel/governor";
+import { createMemoryAllowanceStore } from "@deal-sentinel/governor";
+
+export function buildGovernor(config: GovernorConfig): Governor {
+  const allowanceStore: AllowanceStore = createMemoryAllowanceStore();
+  return new Governor({
+    config,
+    clock: { now: () => Date.now(), sleep: async () => undefined },
+    random: () => 0.5,
+    transport: LIVE_TRANSPORT,
+    notifier: nullNotifier,
+    allowanceStore,
+  });
+}

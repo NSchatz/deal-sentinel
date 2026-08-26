@@ -23,7 +23,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { createFetchTransport } from "@deal-sentinel/governor";
+import { LIVE_TRANSPORT } from "@deal-sentinel/governor";
 
 import {
   closedLoopbackOrigin,
@@ -67,7 +67,7 @@ describe("a 5xx on robots.txt disallows the host completely", () => {
 
   it("refuses the fetch and never asks the server for the page", async () => {
     const { governor } = buildGovernor({
-      transport: createFetchTransport(),
+      transport: LIVE_TRANSPORT,
       clock: new FakeClock(),
       config: config(),
     });
@@ -91,7 +91,7 @@ describe("a 5xx on robots.txt disallows the host completely", () => {
 
   it("keeps refusing while the decision is cached, without re-asking", async () => {
     const { governor } = buildGovernor({
-      transport: createFetchTransport(),
+      transport: LIVE_TRANSPORT,
       clock: new FakeClock(),
       config: config(),
     });
@@ -114,7 +114,7 @@ describe("a connection failure on robots.txt disallows the host completely", () 
   it("refuses when nothing is listening at all", async () => {
     const origin = await closedLoopbackOrigin();
     const { governor } = buildGovernor({
-      transport: createFetchTransport(),
+      transport: LIVE_TRANSPORT,
       clock: new FakeClock(),
       config: config(),
     });
@@ -150,7 +150,7 @@ describe("a timeout on robots.txt disallows the host completely", () => {
 
   it("refuses the fetch when robots.txt never answers", async () => {
     const { governor } = buildGovernor({
-      transport: createFetchTransport(),
+      transport: LIVE_TRANSPORT,
       clock: new FakeClock(),
       // A real timeout, in real milliseconds: this one is about the socket and
       // not about the governor's own virtual clock.

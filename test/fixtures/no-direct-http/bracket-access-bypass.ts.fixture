@@ -1,0 +1,9 @@
+// A bracket property is the same access as a dotted one, and a bracket is not
+// a dot. A check whose only property-access alternative requires a literal `.`
+// is blind to this line.
+
+export async function currentPrice(listingUrl: string): Promise<number> {
+  const response = await globalThis["fetch"](listingUrl);
+  const markup = await response.text();
+  return markup.length;
+}

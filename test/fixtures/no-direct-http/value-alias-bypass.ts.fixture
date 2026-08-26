@@ -1,0 +1,10 @@
+// The identifier as a VALUE rather than as a callee: no parenthesis follows it,
+// so an alternative anchored on `(` never sees it. The request it later makes
+// is exactly as ungoverned.
+
+const send = fetch;
+
+export async function currentPrice(listingUrl: string): Promise<number> {
+  const response = await send(listingUrl);
+  return (await response.text()).length;
+}

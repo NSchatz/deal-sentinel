@@ -1,6 +1,14 @@
 /**
  * THE CHOKEPOINT. Every outbound HTTP request this system will ever make goes
- * through `Governor.fetch`, and there is no second way out of the process.
+ * through `Governor.request`, and there is no second way out of the process.
+ *
+ * That claim is load-bearing, so it is held up by three things and not by this
+ * comment. The package exports no object that can send: a caller asks for the
+ * real client with the `LIVE_TRANSPORT` marker, which has no `send` and is
+ * redeemed only in the constructor below. The factory that builds a real client
+ * lives in `transport.ts` and is not part of the public surface. And
+ * `no-direct-http.ts` fails the suite if any file outside the allowlist names
+ * an HTTP client, names that factory, or imports that module.
  *
  * Why this exists before the second source does, in the words of the repository
  * card: this system "acts on third parties from the household's residential IP,
@@ -36,16 +44,19 @@ import type { OutcomeClass } from "./breaker.ts";
 import { InvalidRequestError } from "./errors.ts";
 import { HostScheduler } from "./host-scheduler.ts";
 import type { Release } from "./host-scheduler.ts";
+import { LIVE_TRANSPORT } from "./ports.ts";
 import type {
   Clock,
   HttpTransport,
   Notifier,
   RandomSource,
+  TransportChoice,
   TransportResponse,
 } from "./ports.ts";
 import { holdForResponse } from "./retry-after.ts";
 import { RobotsGate, classifyRobotsStatus } from "./robots.ts";
 import type { RobotsRetrieval } from "./robots.ts";
+import { createFetchTransport } from "./transport.ts";
 
 export type GovernedRequest = {
   url: string;
@@ -82,7 +93,12 @@ export type GovernorDependencies = {
   config: GovernorConfig;
   clock: Clock;
   random: RandomSource;
-  transport: HttpTransport;
+  /**
+   * A transport the caller supplies, or `LIVE_TRANSPORT` to ask for the real
+   * HTTP client. The marker is the ONLY way to a real client from outside this
+   * package, and it is redeemed here, on the far side of every gate.
+   */
+  transport: TransportChoice;
   notifier: Notifier;
   allowanceStore: AllowanceStore;
 };
@@ -100,7 +116,13 @@ export class Governor {
   constructor(dependencies: GovernorDependencies) {
     this.#config = dependencies.config;
     this.#clock = dependencies.clock;
-    this.#transport = dependencies.transport;
+    // The marker becomes a client HERE and nowhere else. Nothing outside this
+    // package can hold the result: it is private to this instance and every
+    // send through it has already passed the six gates below.
+    this.#transport =
+      dependencies.transport === LIVE_TRANSPORT
+        ? createFetchTransport()
+        : dependencies.transport;
     this.#notifier = dependencies.notifier;
 
     this.#scheduler = new HostScheduler({

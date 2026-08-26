@@ -21,7 +21,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { createFetchTransport, readRetryAfter } from "@deal-sentinel/governor";
+import { LIVE_TRANSPORT, readRetryAfter } from "@deal-sentinel/governor";
 
 import { startLoopbackServer } from "../support/loopback-server.ts";
 import type { LoopbackServer } from "../support/loopback-server.ts";
@@ -59,7 +59,7 @@ after(async () => {
 
 function harness(clock: FakeClock) {
   return buildGovernor({
-    transport: createFetchTransport(),
+    transport: LIVE_TRANSPORT,
     clock,
     config: testConfig({
       http: { requestTimeoutMs: 5_000, maxResponseBytes: 1_048_576 },

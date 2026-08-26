@@ -16,6 +16,7 @@ import type {
   HttpTransport,
   Notification,
   Notifier,
+  TransportChoice,
   TransportRequest,
   TransportResponse,
 } from "@deal-sentinel/governor";
@@ -136,11 +137,14 @@ export type Harness = {
 /**
  * A governor wired to a virtual clock, a reproducible randomness source, a
  * counting notifier and an in-memory allowance store. The transport is the
- * caller's: a recording stub where the criterion is about timing, a real fetch
- * transport pointed at 127.0.0.1 where it is about what a server said.
+ * caller's: a recording stub where the criterion is about timing, or
+ * `LIVE_TRANSPORT` where it is about what a server said, which asks the
+ * governor for the real client and gets it pointed at 127.0.0.1 like every
+ * other request - through the ceiling, the delay and all six gates. There is no
+ * way for a test to hold a real client of its own, which is the point.
  */
 export function buildGovernor(options: {
-  transport: HttpTransport;
+  transport: TransportChoice;
   config?: GovernorConfig;
   clock?: FakeClock;
   random?: () => number;

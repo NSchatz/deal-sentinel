@@ -23,7 +23,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { createFetchTransport, holdForResponse, readRetryAfter } from "@deal-sentinel/governor";
+import { LIVE_TRANSPORT, holdForResponse, readRetryAfter } from "@deal-sentinel/governor";
 
 import { startLoopbackServer } from "../support/loopback-server.ts";
 import type { LoopbackServer } from "../support/loopback-server.ts";
@@ -61,7 +61,7 @@ after(async () => {
 
 function harness(clock: FakeClock) {
   return buildGovernor({
-    transport: createFetchTransport(),
+    transport: LIVE_TRANSPORT,
     clock,
     config: testConfig({
       http: { requestTimeoutMs: 5_000, maxResponseBytes: 1_048_576 },
@@ -167,6 +167,48 @@ describe("a Retry-After nobody can read still holds the host", () => {
       const waited = await holdAfter(value);
       assert.ok(waited > 1_000, `${JSON.stringify(value)} was retried after ${waited}ms`);
     }
+  });
+});
+
+/**
+ * Not AC14 and not AC15: `Retry-After: 0` parses perfectly well as
+ * `delay-seconds`, and AC12's "at least that many seconds" is satisfied by
+ * zero. It is here because ruling R4's principle is wider than the two cases
+ * AC15 names, and because a 429 that names a value must never earn LESS of a
+ * hold than the same 429 with no header at all.
+ */
+describe("a Retry-After of zero is not a licence to retry at once", () => {
+  const noWait = ["0", "00", " 0 "] as const;
+
+  for (const value of noWait) {
+    it(`falls back to the configured back-off for ${JSON.stringify(value)}`, async () => {
+      const waited = await holdAfter(value);
+      assert.ok(
+        waited >= BACKOFF_MS,
+        `${JSON.stringify(value)} produced a hold of ${waited}ms, which is less ` +
+          `than the ${BACKOFF_MS}ms the same 429 would have earned carrying no ` +
+          "header at all",
+      );
+    });
+  }
+
+  it("keeps the parser honest about what the header said", () => {
+    // The reading stays faithful to RFC 9110 - zero IS a legal delay-seconds
+    // value - and the refusal lives in the policy layer, where the ruling is.
+    const reading = readRetryAfter("0", 0);
+    assert.equal(reading.form, "delay-seconds");
+    assert.equal(reading.holdMs, 0);
+
+    const hold = holdForResponse(429, "0", 0, BACKOFF_MS);
+    assert.ok(hold !== null);
+    assert.equal(hold.holdMs, BACKOFF_MS);
+    assert.match(hold.reason, /no wait at all/);
+  });
+
+  it("still honours a value that asks for a real wait", () => {
+    const hold = holdForResponse(429, "30", 0, BACKOFF_MS);
+    assert.ok(hold !== null);
+    assert.equal(hold.holdMs, 30_000);
   });
 });
 

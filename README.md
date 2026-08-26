@@ -74,6 +74,13 @@ place, and it is where every rule lives:
   configured fraction, stopped (not slowed) at the allowance, and stored in
   PostgreSQL so a crash loop inside a period resumes the count instead of
   spending it twice.
+- **No second way out.** The package exports nothing that can send: a caller
+  that wants the real HTTP client asks for the `LIVE_TRANSPORT` marker, which
+  has no `send` and which only a `Governor` can redeem, on the far side of all
+  six gates above. `test/unit/no-direct-http.test.ts` scans every source file in
+  the tree and fails the suite on any ordinary spelling of a client outside one
+  allowlisted module - a call, a property of any object, an alias, a
+  destructure, an import, or the name as a string.
 
 Configuration lives in `config/governor.json` and every value in it is required:
 absent, unparseable or incomplete configuration makes the process refuse to
