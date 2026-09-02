@@ -6,7 +6,7 @@
  *   as part of `pnpm run test`.
  *
  * Graded by proving UNREACHABILITY and not present-day absence. A check that
- * can only pass proves nothing, so this file does four things in this order:
+ * can only pass proves nothing, so this file does five things in this order:
  *
  *   1. runs the check over committed fixture call sites that bypass the
  *      governor and asserts it REJECTS them - a bare `fetch(`, a second client
@@ -22,7 +22,11 @@
  *   3. runs it over fixtures that reach this package's OWN ungoverned
  *      transport, by the public name it used to carry and by a deep import of
  *      the module it lives in, and asserts both are rejected;
- *   4. runs it over the repository as it stands and asserts no findings, and
+ *   4. runs it over samples that reach the wire through a MECHANISM rather than
+ *      through a client's name - a specifier handed to the result of a call, a
+ *      raw socket, a global that opens its own connection, a subprocess that
+ *      fetches - and asserts each is rejected;
+ *   5. runs it over the repository as it stands and asserts no findings, and
  *      asserts that the public surface hands out nothing that can send.
  *
  * Every offending sample lives in `test/fixtures/no-direct-http/` with a
@@ -234,6 +238,79 @@ describe("the check rejects a call site that reaches this package's own transpor
       fixture("governed-live-adapter.ts.fixture", "packages/adapters/src/live.ts"),
     ]);
     assert.deepEqual(findings, [], describeFindings(findings));
+  });
+});
+
+/**
+ * The third kind of site: a mechanism that puts a request on the wire without
+ * naming a client either group knows. The first rule is complete over the
+ * global client's identifier; these are not other SPELLINGS of that client,
+ * they are other ways out, and each one is an enumeration entry that had to be
+ * thought of. `no-direct-http.ts` says so in its own header rather than
+ * claiming a completeness a text scan cannot have.
+ */
+describe("the check reports mechanisms that reach the wire without naming a client", () => {
+  it("rejects a module specifier handed to the result of a call", () => {
+    const findings = findDirectHttpCallSites([
+      fixture("require-alias-bypass.ts.fixture", "packages/adapters/src/required.ts"),
+    ]);
+    const rules = new Set(findings.map((finding) => finding.rule));
+    assert.ok(
+      rules.has("client-import"),
+      "createRequire(import.meta.url)(...) reaches an enumerated module through " +
+        "a head the import rules did not spell",
+    );
+    assert.ok(
+      rules.has("client-module-literal"),
+      "the specifier parked in a variable first was not reported",
+    );
+  });
+
+  it("rejects a raw socket carrying a request line", () => {
+    const findings = findDirectHttpCallSites([
+      fixture("raw-socket-bypass.ts.fixture", "packages/adapters/src/socket.ts"),
+    ]);
+    assert.ok(
+      findings.some((finding) => finding.rule === "client-import"),
+      "node:net and node:tls reach the wire and were not reported",
+    );
+    // Both sockets, on their own lines.
+    assert.equal(
+      new Set(
+        findings
+          .filter((finding) => finding.rule === "client-import")
+          .map((finding) => finding.line),
+      ).size,
+      2,
+    );
+  });
+
+  it("rejects a global that opens its own connection", () => {
+    const findings = findDirectHttpCallSites([
+      fixture("socket-global-bypass.ts.fixture", "packages/adapters/src/streamed.ts"),
+    ]);
+    assert.deepEqual(
+      findings
+        .filter((finding) => finding.rule === "client-global-constructor")
+        .map((finding) => finding.line),
+      [6, 9],
+    );
+  });
+
+  it("rejects a subprocess that fetches, and does not report the spawn itself", () => {
+    const findings = findDirectHttpCallSites([
+      fixture(
+        "fetching-subprocess-bypass.ts.fixture",
+        "packages/adapters/src/shelled.ts",
+      ),
+    ]);
+    assert.deepEqual(
+      findings.map((finding) => finding.rule),
+      ["fetching-subprocess"],
+      "the program is the finding; node:child_process is not a rule, because " +
+        "this repository runs docker and pg_restore for reasons that are not " +
+        "fetching " + describeFindings(findings),
+    );
   });
 });
 

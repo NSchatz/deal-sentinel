@@ -15,6 +15,12 @@
  *      instead, which has no `send` and only the `Governor` can redeem - and
  *      naming it anyway is reported here so that removing it from the public
  *      surface is not the only thing standing in the way.
+ *   3. ANOTHER MECHANISM that puts a request on the wire without naming a
+ *      client the first two rules know: a raw socket (`node:net`, `node:tls`),
+ *      a global that opens its own connection (the two socket constructors), a
+ *      module specifier reached through a call the import rules do not spell -
+ *      `createRequire(import.meta.url)("node:http")` is the shape - or a
+ *      subprocess running a program whose whole job is fetching a URL.
  *
  * Rule 1 does NOT enumerate the global names the client can be reached through.
  * It cannot: `globalThis`, `window`, `self` and Node's own `global` all resolve
@@ -40,9 +46,13 @@
  * What this cannot do, said plainly rather than left to be discovered: it is a
  * text scan, so a name COMPUTED at run time - `eval`, `new Function`, a
  * specifier concatenated from fragments - is outside its reach, and would be
- * outside an AST checker's reach too. The property it does prove is that no
- * ordinary spelling of a client survives review: not a call, not a property of
- * any object, not an alias, not a destructure, not an import, not a string.
+ * outside an AST checker's reach too. Rule 3 is an ENUMERATION of mechanisms
+ * and it is not claimed to be complete: a subprocess running a program not on
+ * its list, or a protocol implemented by hand over a socket obtained some other
+ * way, is still a way out. The property this does prove is that no ordinary
+ * spelling of a client survives review - not a call, not a property of any
+ * object, not an alias, not a destructure, not an import, not a string - and
+ * that the mechanisms below have each been thought about once, in writing.
  *
  * The allowlist is deliberately by exact path and by rule. Widening it is a
  * visible, reviewable diff, which is the point.
@@ -111,11 +121,12 @@ export const HTTP_CLIENT_ALLOWLIST: readonly AllowlistEntry[] = [
   },
   {
     path: "test/support/loopback-server.ts",
-    rules: ["client-import"],
+    rules: ["client-import", "client-module-literal"],
     why:
       "Creates an http.Server bound to 127.0.0.1 so the suite can exercise " +
       "robots, back-pressure and breaker cases without touching a third " +
-      "party. It serves; it never sends.",
+      "party. It serves; it never sends. The module literals are that same " +
+      "import and a type-only one for the socket it is handed.",
   },
 ];
 
@@ -141,6 +152,10 @@ type Rule = { name: string; scans: ScanTarget; pattern: RegExp; describe: string
 const GLOBAL_CLIENT = "fet" + "ch";
 const TRANSPORT_FACTORY = "create" + "Fetch" + "Transport";
 const TRANSPORT_MODULE = "trans" + "port";
+/** Globals that open their own connection: an HTTP upgrade and a GET stream. */
+const SOCKET_CLIENTS = ["Web" + "Socket", "Event" + "Source"];
+/** Programs whose whole job is fetching a URL, for the subprocess rule. */
+const FETCHING_PROGRAMS = ["cu" + "rl", "wg" + "et", "htt" + "pie"];
 
 /**
  * An identifier boundary. `-` joins the two halves so that `node-fetch` inside
@@ -157,20 +172,43 @@ const AFTER = "(?![\\w$-])";
  */
 const QUOTE = "[\\x22\\x27]";
 const NOT_QUOTE = "[^\\x22\\x27]";
-const IMPORT_HEAD = "(?:\\bfrom\\s*|\\brequire\\s*\\(\\s*|\\bimport\\s*\\(\\s*)";
+const ANY_QUOTE = "[\\x22\\x27`]";
+/**
+ * What can sit immediately before a module specifier. The last alternative is
+ * the return value of a call being called with one - `createRequire(
+ * import.meta.url)("node:http")` reaches every module the list below names
+ * through a head none of the other three spell.
+ */
+const IMPORT_HEAD =
+  "(?:\\bfrom\\s*|\\brequire\\s*\\(\\s*|\\bimport\\s*\\(\\s*|\\)\\s*\\(\\s*)";
+
+/**
+ * Specifiers that reach a client or a raw socket. `net` and `tls` are here
+ * because a socket plus the seven bytes of a request line is an HTTP client
+ * that no client rule would recognise.
+ */
+const CLIENT_MODULE =
+  "(?:node:)?(?:http|https|http2|net|tls|undici|axios|node-" +
+  GLOBAL_CLIENT +
+  "|got|superagent|request|phin|needle|ky)";
+
+/**
+ * The same list, narrowed to the one spelling that can ONLY be a specifier: the
+ * `node:` scheme. A bare `"http"` or `"request"` is a config key and a URL
+ * scheme in this repository long before it is a module, and a bare package name
+ * is something people write in a list of package names - both directions
+ * produce a check that fires on `config.ts` or on prose, and a check that fires
+ * on prose is a check somebody deletes. The bare spellings are not lost: the
+ * rule above reads them wherever an import head precedes them, and that head
+ * now includes the returned-call form.
+ */
+const CLIENT_MODULE_LITERAL = "node:(?:http|https|http2|net|tls)";
 
 const RULES: readonly Rule[] = [
   {
     name: "client-import",
     scans: "source",
-    pattern: new RegExp(
-      IMPORT_HEAD +
-        QUOTE +
-        "(?:node:)?(?:http|https|http2|undici|axios|node-" +
-        GLOBAL_CLIENT +
-        "|got|superagent|request|phin|needle|ky)" +
-        QUOTE,
-    ),
+    pattern: new RegExp(IMPORT_HEAD + QUOTE + CLIENT_MODULE + QUOTE),
     describe: "imports an HTTP client",
   },
   {
@@ -219,14 +257,48 @@ const RULES: readonly Rule[] = [
     // split over two lines - and it is not a sentence anybody writes.
     scans: "source",
     pattern: new RegExp(
-      "[\\x22\\x27`](?:" + GLOBAL_CLIENT + "|" + TRANSPORT_FACTORY + ")[\\x22\\x27`]",
+      ANY_QUOTE +
+        "(?:" +
+        [GLOBAL_CLIENT, TRANSPORT_FACTORY, ...SOCKET_CLIENTS].join("|") +
+        ")" +
+        ANY_QUOTE,
     ),
     describe: "spells the name of an HTTP client as a string",
+  },
+  {
+    name: "client-module-literal",
+    // The module names, by the same reasoning as the rule above and for the
+    // shape the import rules cannot reach: a specifier handed to a call, or
+    // parked in a variable first. `client-import` reads the head; this reads
+    // the name wherever it is written.
+    scans: "source",
+    pattern: new RegExp(ANY_QUOTE + CLIENT_MODULE_LITERAL + ANY_QUOTE),
+    describe: "spells the specifier of an HTTP client module as a string",
+  },
+  {
+    name: "client-global-constructor",
+    // Any resolution of the identifier, exactly as `fetch-call` treats the
+    // global client: both of these open their own connection to a URL and
+    // neither is reached through anything the client rules name.
+    scans: "code",
+    pattern: new RegExp(BEFORE + "(?:" + SOCKET_CLIENTS.join("|") + ")" + AFTER),
+    describe: "names a global client that opens its own connection",
+  },
+  {
+    name: "fetching-subprocess",
+    // The other end of `node:child_process`, which is NOT itself a rule: this
+    // repository legitimately runs `docker` and `pg_restore` from three test
+    // files, and allowlisting those for "may run any program" would be a wider
+    // hole than the one it closed. What is reported is the payload - a program
+    // whose whole job is fetching a URL - wherever it is named.
+    scans: "source",
+    pattern: new RegExp("\\b(?:" + FETCHING_PROGRAMS.join("|") + ")\\b"),
+    describe: "runs a program that fetches a URL",
   },
 ];
 
 /** The identifiers a computed access with a literal key is rewritten for. */
-const COMPUTED_ACCESS = [GLOBAL_CLIENT, TRANSPORT_FACTORY].map(
+const COMPUTED_ACCESS = [GLOBAL_CLIENT, TRANSPORT_FACTORY, ...SOCKET_CLIENTS].map(
   (identifier) => ({
     identifier,
     pattern: new RegExp("\\[[ \\t]*([\\x22\\x27`])" + identifier + "\\1[ \\t]*\\]", "g"),
