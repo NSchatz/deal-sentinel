@@ -23,3 +23,22 @@ export class InvalidRequestError extends Error {
     this.name = "InvalidRequestError";
   }
 }
+
+/**
+ * Every reason the governor declines to make a request, as a closed vocabulary.
+ *
+ * It lives here rather than in `governor.ts` because more than the chokepoint
+ * needs to name it: the robots gate has to be able to say "this was one of the
+ * governor's own refusals" and mean something other than "this host could not
+ * be reached". Those two are opposite facts about the world - one is about US,
+ * one is about the HOST - and only one of them is a verdict worth caching.
+ * `governor.ts` re-exports this name, so the public surface is unchanged.
+ */
+export type RefusalReason =
+  | "unconfigured-host"
+  | "unknown-source"
+  | "source-paused"
+  | "allowance-exhausted"
+  | "robots-unreachable"
+  | "robots-disallowed"
+  | "transport-error";

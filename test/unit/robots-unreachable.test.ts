@@ -32,8 +32,15 @@ import {
   startLoopbackServer,
 } from "../support/loopback-server.ts";
 import type { LoopbackServer } from "../support/loopback-server.ts";
-import { buildGovernor, testConfig } from "../support/governor-harness.ts";
-import { FakeClock } from "../support/fake-clock.ts";
+import {
+  buildGovernor,
+  productRequests,
+  recordingTransport,
+  robotsAbsent,
+  testConfig,
+} from "../support/governor-harness.ts";
+import type { SentRequest } from "../support/governor-harness.ts";
+import { FakeClock, sequenceRandom } from "../support/fake-clock.ts";
 
 function config(timeoutMs = 2_000) {
   return testConfig({
@@ -128,6 +135,226 @@ describe("a connection failure on robots.txt disallows the host completely", () 
     if (outcome.ok) return;
     assert.equal(outcome.reason, "robots-unreachable");
     assert.match(outcome.detail, /could not be reached|status/);
+  });
+});
+
+/**
+ * The other side of AC7, which is a scope as much as a rule:
+ *
+ *   IF a host's `robots.txt` is unreachable through A SERVER ERROR OR A NETWORK
+ *   ERROR THEN THE SYSTEM SHALL treat that host as fully disallowed.
+ *
+ * The governor's own `robots.txt` retrieval goes through the chokepoint like
+ * everything else, so it can meet the governor's OWN gates on the far side of
+ * the per-host wait: the source paused by its breaker (AC16), or its allowance
+ * for the period spent (AC19). Neither is a server error and neither is a
+ * network error. Nothing left the process, so nothing was learned about the
+ * host, and there is no verdict to hold.
+ *
+ * Recording it as "unreachable" would be wrong in two ways that outlive the
+ * cause. The cache is keyed by ORIGIN, so one source's spent allowance would
+ * disallow that host for EVERY source, against AC19's "SHALL leave every other
+ * source serving"; and the entry would stand for the whole
+ * `robots.cacheBoundMs`, so a new allowance period would still meet the
+ * previous period's exhaustion, against AC21.
+ *
+ * Graded against the recording transport, because these cases are about a
+ * request that does NOT leave and about a retrieval that must happen LATER,
+ * both of which the injected clock decides without a socket in the way.
+ */
+describe("the governor's own refusal is not an unreachable robots.txt", () => {
+  const PERIOD_MS = 3_600_000;
+
+  function twoHostConfig(limit: number) {
+    return testConfig({
+      hosts: {
+        // The fast host reaches its releases while the slow host's robots.txt
+        // retrieval is still waiting at its own gate. That is the whole
+        // arrangement: it puts one of the governor's gates on the far side of
+        // a wait that a robots retrieval is sitting in.
+        "127.0.0.1": { maxRequests: 100, intervalMs: 60_000, minDelayMs: 1, jitterMs: 1 },
+        "127.0.0.2": {
+          maxRequests: 100,
+          intervalMs: 60_000,
+          minDelayMs: 60_000,
+          jitterMs: 1,
+        },
+      },
+      // Six hours: long enough that a cached verdict would still be standing at
+      // every assertion below, which is what makes "it was asked again" mean
+      // "nothing was cached" rather than "the bound elapsed".
+      robots: { cacheBoundMs: 21_600_000 },
+      breaker: { minimumOutcomes: 10_000 },
+      sources: {
+        metered: { allowance: { limit, periodMs: PERIOD_MS, warnFraction: 0.9 } },
+        other: {},
+      },
+    });
+  }
+
+  function robotsSentTo(sent: readonly SentRequest[], hostname: string): SentRequest[] {
+    return sent.filter((request) => {
+      const url = new URL(request.url);
+      return url.hostname === hostname && url.pathname === "/robots.txt";
+    });
+  }
+
+  it("does not disallow the host for every other source", async () => {
+    const clock = new FakeClock();
+    const transport = recordingTransport(clock, robotsAbsent());
+    const { governor } = buildGovernor({
+      transport,
+      clock,
+      config: twoHostConfig(1),
+      random: sequenceRandom([0]),
+    });
+
+    // Offered together: the fast host spends the single unit of allowance while
+    // the slow host's robots.txt retrieval is still queued behind its ceiling.
+    const [, slow] = await Promise.all([
+      governor.request({ url: "http://127.0.0.1/one", sourceId: "metered" }),
+      governor.request({ url: "http://127.0.0.2/two", sourceId: "metered" }),
+    ]);
+
+    assert.equal(slow.ok, false);
+    if (slow.ok) return;
+    assert.equal(
+      slow.reason,
+      "allowance-exhausted",
+      "the governor's own refusal was reported as a fact about the host",
+    );
+    assert.doesNotMatch(slow.detail, /2\.3\.1\.4/);
+    assert.equal(
+      robotsSentTo(transport.sent, "127.0.0.2").length,
+      0,
+      "the refused retrieval left the process after all",
+    );
+
+    // A different source, with no allowance of its own to have spent. The host
+    // is asked for its rules for the first time, and is served.
+    const other = await governor.request({
+      url: "http://127.0.0.2/three",
+      sourceId: "other",
+    });
+
+    assert.equal(
+      other.ok,
+      true,
+      "one source's spent allowance held the host disallowed for every source",
+    );
+    assert.equal(robotsSentTo(transport.sent, "127.0.0.2").length, 1);
+  });
+
+  it("serves the host again in the next allowance period (AC21)", async () => {
+    const clock = new FakeClock();
+    const transport = recordingTransport(clock, robotsAbsent());
+    const { governor } = buildGovernor({
+      transport,
+      clock,
+      config: twoHostConfig(2),
+      random: sequenceRandom([0]),
+    });
+
+    const [, slow] = await Promise.all([
+      governor.request({ url: "http://127.0.0.1/one", sourceId: "metered" }),
+      governor.request({ url: "http://127.0.0.2/two", sourceId: "metered" }),
+    ]);
+    assert.equal(slow.ok, false);
+    if (slow.ok) return;
+    assert.equal(slow.reason, "allowance-exhausted");
+
+    await clock.advanceBy(PERIOD_MS);
+
+    const afterRoll = await governor.request({
+      url: "http://127.0.0.2/two",
+      sourceId: "metered",
+    });
+
+    assert.equal(
+      afterRoll.ok,
+      true,
+      "the new period met the previous period's exhaustion, cached as a robots verdict",
+    );
+    assert.equal(
+      robotsSentTo(transport.sent, "127.0.0.2").length,
+      1,
+      "the host's rules were never actually retrieved",
+    );
+  });
+
+  it("does not disallow the host because the breaker paused the source", async () => {
+    const clock = new FakeClock();
+    const transport = recordingTransport(
+      clock,
+      robotsAbsent((request) =>
+        new URL(request.url).hostname === "127.0.0.1" ? { status: 500 } : { status: 200 },
+      ),
+    );
+    const config = testConfig({
+      hosts: {
+        "127.0.0.1": { maxRequests: 100, intervalMs: 60_000, minDelayMs: 1, jitterMs: 1 },
+        "127.0.0.2": {
+          maxRequests: 100,
+          intervalMs: 60_000,
+          minDelayMs: 60_000,
+          jitterMs: 1,
+        },
+      },
+      robots: { cacheBoundMs: 21_600_000 },
+      breaker: {
+        windowMs: 6_000_000,
+        minimumOutcomes: 2,
+        failureRateThreshold: 0.5,
+        pauseMs: 3_600_000,
+      },
+      sources: { flaky: {} },
+    });
+    const { governor } = buildGovernor({
+      transport,
+      clock,
+      config,
+      random: sequenceRandom([0]),
+    });
+
+    // The failing host trips the breaker while the other host's robots.txt
+    // retrieval waits at its own gate.
+    const outcomes = await Promise.all([
+      ...["/a", "/b", "/c"].map((path) =>
+        governor.request({ url: `http://127.0.0.1${path}`, sourceId: "flaky" }),
+      ),
+      governor.request({ url: "http://127.0.0.2/two", sourceId: "flaky" }),
+    ]);
+
+    const slow = outcomes[3];
+    assert.equal(slow.ok, false);
+    if (slow.ok) return;
+    assert.equal(
+      slow.reason,
+      "source-paused",
+      "a paused source's request left, or was disguised as a robots verdict",
+    );
+    assert.equal(robotsSentTo(transport.sent, "127.0.0.2").length, 0);
+    assert.equal(
+      productRequests(transport.sent).filter(
+        (sent) => new URL(sent.url).hostname === "127.0.0.1",
+      ).length,
+      1,
+      "requests kept leaving for a source the breaker had paused",
+    );
+
+    await clock.advanceBy(3_600_000);
+
+    const afterPause = await governor.request({
+      url: "http://127.0.0.2/two",
+      sourceId: "flaky",
+    });
+
+    assert.equal(
+      afterPause.ok,
+      true,
+      "the pause outlived itself as a cached complete-disallow for the host",
+    );
+    assert.equal(robotsSentTo(transport.sent, "127.0.0.2").length, 1);
   });
 });
 

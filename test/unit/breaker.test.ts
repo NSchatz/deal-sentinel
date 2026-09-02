@@ -28,9 +28,15 @@ import { LIVE_TRANSPORT } from "@deal-sentinel/governor";
 
 import { reply, routes, startLoopbackServer } from "../support/loopback-server.ts";
 import type { LoopbackServer } from "../support/loopback-server.ts";
-import { buildGovernor, testConfig } from "../support/governor-harness.ts";
+import {
+  buildGovernor,
+  productRequests,
+  recordingTransport,
+  robotsAbsent,
+  testConfig,
+} from "../support/governor-harness.ts";
 import type { Harness } from "../support/governor-harness.ts";
-import { FakeClock } from "../support/fake-clock.ts";
+import { FakeClock, sequenceRandom } from "../support/fake-clock.ts";
 
 const PAUSE_MS = 1_800_000;
 
@@ -233,5 +239,140 @@ describe("a source whose failures cross its threshold is paused", () => {
     });
     assert.equal(outcome.ok, true);
     assert.equal(notifier.of("breaker-paused").length, 0);
+  });
+});
+
+/**
+ * The half of AC16 that the sequential cases above cannot reach.
+ *
+ * "SHALL refuse further requests for that source" is about requests, not about
+ * calls: AC1 fixes the boundary as "before that request LEAVES THE PROCESS" and
+ * AC20 counts a metered request "WHEN a request for a metered source LEAVES THE
+ * PROCESS". A request that was admitted before the pause and is still waiting
+ * at the per-host gate when the pause happens has not left yet, so refusing it
+ * is still in front of the boundary the spec uses.
+ *
+ * This is the mainline shape and not a corner: an adapter with a page list
+ * offers its URLs together, the per-host queue serialises them one per
+ * `minDelayMs`, and `config/governor.json` pauses a source for an hour. Every
+ * request left in that queue would otherwise keep going to a source this system
+ * has already declared paused.
+ *
+ * Graded against the recording transport rather than the loopback server above,
+ * because the claim is about WHEN a request leaves and not about what a server
+ * said: with no socket in the way, the interleaving is decided by the injected
+ * clock alone and the count is exact rather than a race.
+ */
+describe("a pause reaches the requests already queued behind the ceiling", () => {
+  const QUEUE_PAUSE_MS = 3_600_000;
+
+  function queuedConfig() {
+    return testConfig({
+      hosts: {
+        // A minute between releases, so six offers made together are still
+        // waiting when the breaker trips on the outcome of the first.
+        "127.0.0.1": {
+          maxRequests: 100,
+          intervalMs: 60_000,
+          minDelayMs: 60_000,
+          jitterMs: 1,
+        },
+        "127.0.0.2": {
+          maxRequests: 100,
+          intervalMs: 60_000,
+          minDelayMs: 1,
+          jitterMs: 1,
+        },
+      },
+      breaker: {
+        windowMs: 6_000_000,
+        minimumOutcomes: 2,
+        failureRateThreshold: 0.5,
+        pauseMs: QUEUE_PAUSE_MS,
+      },
+      sources: { "failing-source": {}, "healthy-source": {} },
+    });
+  }
+
+  it("releases nothing further for a source paused while its requests waited", async () => {
+    const clock = new FakeClock(0);
+    const transport = recordingTransport(
+      clock,
+      robotsAbsent(() => ({ status: 500 })),
+    );
+    const { governor, notifier } = buildGovernor({
+      transport,
+      clock,
+      config: queuedConfig(),
+      random: sequenceRandom([0]),
+    });
+
+    await Promise.all(
+      ["/a", "/b", "/c", "/d", "/e", "/f"].map((path) =>
+        governor.request({
+          url: `http://127.0.0.1${path}`,
+          sourceId: "failing-source",
+        }),
+      ),
+    );
+
+    const pause = notifier.of("breaker-paused")[0];
+    assert.notEqual(pause, undefined, "the breaker never paused: the case is not set up");
+
+    const pausedAt = pause.at.getTime();
+    const afterPause = productRequests(transport.sent).filter(
+      (sent) => sent.at > pausedAt,
+    );
+
+    assert.deepEqual(
+      afterPause.map((sent) => sent.url),
+      [],
+      `${afterPause.length} request(s) for a paused source left the process anyway`,
+    );
+    assert.equal(notifier.of("breaker-paused").length, 1);
+  });
+
+  it("still serves a different source offered at the same time", async () => {
+    const clock = new FakeClock(0);
+    const transport = recordingTransport(
+      clock,
+      robotsAbsent((request) =>
+        new URL(request.url).hostname === "127.0.0.1" ? { status: 500 } : { status: 200 },
+      ),
+    );
+    const { governor } = buildGovernor({
+      transport,
+      clock,
+      config: queuedConfig(),
+      random: sequenceRandom([0]),
+    });
+
+    const outcomes = await Promise.all([
+      ...["/a", "/b", "/c", "/d"].map((path) =>
+        governor.request({
+          url: `http://127.0.0.1${path}`,
+          sourceId: "failing-source",
+        }),
+      ),
+      ...["/x", "/y", "/z"].map((path) =>
+        governor.request({
+          url: `http://127.0.0.2${path}`,
+          sourceId: "healthy-source",
+        }),
+      ),
+    ]);
+
+    const healthy = outcomes.slice(4);
+    assert.deepEqual(
+      healthy.map((outcome) => (outcome.ok ? "ok" : outcome.reason)),
+      ["ok", "ok", "ok"],
+      "one source's breaker stopped another source that was offered beside it",
+    );
+    assert.equal(
+      productRequests(transport.sent).filter(
+        (sent) => new URL(sent.url).hostname === "127.0.0.2",
+      ).length,
+      3,
+    );
   });
 });

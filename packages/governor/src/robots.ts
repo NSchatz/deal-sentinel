@@ -18,27 +18,38 @@
  */
 
 import type { GovernorConfig } from "./config.ts";
+import type { RefusalReason } from "./errors.ts";
 import type { Clock } from "./ports.ts";
 import { decidePath, parseRobotsTxt, selectGroup } from "./robots-parse.ts";
 import type { RobotsFile, RobotsRule } from "./robots-parse.ts";
 
-/** What a retrieval of `/robots.txt` produced, already classified. */
+/**
+ * What a retrieval of `/robots.txt` produced, already classified.
+ *
+ * `refused` is not a fourth flavour of the other three: the first three are
+ * things we learned about the HOST, and `refused` is the governor declining to
+ * go and ask - its own breaker, its own allowance. Nothing about the host was
+ * learned, so `refused` is never cached and never decides anything.
+ */
 export type RobotsRetrieval =
   | { kind: "rules"; body: string; truncated: boolean }
   | { kind: "unavailable"; detail: string }
-  | { kind: "unreachable"; detail: string };
+  | { kind: "unreachable"; detail: string }
+  | { kind: "refused"; reason: RefusalReason; detail: string };
 
 export type RobotsDecision =
   | { state: "allowed"; rule: RobotsRule | null; detail: string }
   | { state: "disallowed"; rule: RobotsRule; detail: string }
-  | { state: "unreachable"; detail: string };
+  | { state: "unreachable"; detail: string }
+  | { state: "refused"; reason: RefusalReason; detail: string };
 
 type CacheEntry = {
   fetchedAt: number;
   value:
     | { kind: "rules"; file: RobotsFile; truncated: boolean }
     | { kind: "unavailable"; detail: string }
-    | { kind: "unreachable"; detail: string };
+    | { kind: "unreachable"; detail: string }
+    | { kind: "refused"; reason: RefusalReason; detail: string };
 };
 
 /** Classify an HTTP status for the robots file. The two sides are not symmetric. */
@@ -73,6 +84,13 @@ export class RobotsGate {
   async decide(url: URL, sourceId: string): Promise<RobotsDecision> {
     const origin = url.origin;
     const entry = await this.#entryFor(origin, sourceId);
+
+    if (entry.value.kind === "refused") {
+      // The retrieval never happened, so there is no verdict here to report and
+      // none was stored. The caller surfaces the refusal that actually
+      // happened; asking again later asks the host again.
+      return { state: "refused", reason: entry.value.reason, detail: entry.value.detail };
+    }
 
     if (entry.value.kind === "unreachable") {
       return {
@@ -133,6 +151,10 @@ export class RobotsGate {
       return cached;
     }
 
+    // One retrieval per origin at a time, however many callers are waiting.
+    // A waiter that joins a retrieval which is then REFUSED inherits that
+    // refusal for this attempt only: nothing is cached, so its next attempt
+    // asks the host again, and the direction of the error is fewer requests.
     const existing = this.#inFlight.get(origin);
     if (existing !== undefined) return existing;
 
@@ -162,7 +184,11 @@ export class RobotsGate {
           }
         : { fetchedAt, value: retrieval };
 
-    this.#cache.set(origin, entry);
+    // A refusal is not a verdict about this host, so it does not become one.
+    // Caching it would hold a host completely disallowed - for EVERY source,
+    // because this cache is keyed by origin - for the whole cache bound, long
+    // after the pause or the allowance period that caused it had cleared.
+    if (entry.value.kind !== "refused") this.#cache.set(origin, entry);
     return entry;
   }
 }

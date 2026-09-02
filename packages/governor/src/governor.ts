@@ -31,6 +31,11 @@
  *   6. the host's ceiling, its randomised delay and any back-pressure hold have
  *      all been satisfied.
  *
+ * Gate 6 is a WAIT, and it can be as long as a whole ceiling interval, so gates
+ * 3 and 4 are asked a second time on the far side of it. Both are statements
+ * about a moment, and a request that spent an hour in a per-host queue is being
+ * released in a different moment from the one that admitted it.
+ *
  * Only then does a request leave, and the moment it leaves it is counted
  * against the source's allowance - whatever comes back.
  */
@@ -42,6 +47,7 @@ import type { AllowanceStore } from "./allowance.ts";
 import { Breaker } from "./breaker.ts";
 import type { OutcomeClass } from "./breaker.ts";
 import { InvalidRequestError } from "./errors.ts";
+import type { RefusalReason } from "./errors.ts";
 import { HostScheduler } from "./host-scheduler.ts";
 import type { Release } from "./host-scheduler.ts";
 import { LIVE_TRANSPORT } from "./ports.ts";
@@ -68,14 +74,9 @@ export type GovernedRequest = {
   maxBytes?: number;
 };
 
-export type RefusalReason =
-  | "unconfigured-host"
-  | "unknown-source"
-  | "source-paused"
-  | "allowance-exhausted"
-  | "robots-unreachable"
-  | "robots-disallowed"
-  | "transport-error";
+// Declared in `errors.ts`, which is where the robots gate can also reach it,
+// and re-exported here so callers keep importing it from the same place.
+export type { RefusalReason };
 
 export type GovernedResponse = {
   url: string;
@@ -205,6 +206,13 @@ export class Governor {
     }
 
     const robots = await this.#robots.decide(url, request.sourceId);
+    if (robots.state === "refused") {
+      // Not a verdict about the host: one of THIS governor's gates refused the
+      // robots retrieval on the far side of its own wait, so the request it was
+      // for is refused for that same live reason - never disguised as, or
+      // cached as, an unreachable robots.txt.
+      return { ok: false, reason: robots.reason, detail: robots.detail };
+    }
     if (robots.state === "unreachable") {
       return { ok: false, reason: "robots-unreachable", detail: robots.detail };
     }
@@ -235,9 +243,27 @@ export class Governor {
 
     const release = await this.#scheduler.release(host, ceiling);
 
-    // Asked again on the far side of the wait: a request that queued behind the
-    // ceiling for an hour must not spend an allowance the period has meanwhile
-    // used up.
+    // Gates 3 and 4 are asked AGAIN here, in the order `request` asks them,
+    // because the wait above is unbounded: it can be the whole ceiling
+    // interval, and the per-host queue serialises every concurrent offer
+    // behind it. A decision taken before that wait is a decision about a
+    // moment that has passed. So a request that queued behind the ceiling
+    // must not leave for a source the breaker has meanwhile PAUSED, and must
+    // not spend an allowance the period has meanwhile USED UP.
+    //
+    // The breaker half is the one that is easy to leave out, and leaving it
+    // out is what makes a paused source keep receiving one request every
+    // `minDelayMs` for as long as its queue holds them - which is precisely
+    // the "runaway scraper" this package exists to make unreachable.
+    const paused = this.#breaker.status(request.sourceId);
+    if (paused.paused) {
+      return {
+        ok: false,
+        reason: "source-paused",
+        detail: `${request.sourceId} is paused by its breaker: ${paused.detail}`,
+      };
+    }
+
     const allowance = await this.#allowance.check(request.sourceId);
     if (allowance.stopped) {
       return {
@@ -311,9 +337,26 @@ export class Governor {
     );
 
     if (!outcome.ok) {
-      // Every refusal below this line leaves robots.txt undefined, and RFC 9309
-      // 2.3.1.4 says undefined means complete disallow. Nothing is fetched.
-      return { kind: "unreachable", detail: outcome.detail };
+      if (outcome.reason === "transport-error") {
+        // A server or a network error: robots.txt is UNDEFINED, and RFC 9309
+        // 2.3.1.4 says undefined means complete disallow. Nothing is fetched,
+        // and this is a fact about the host, so it caches like any verdict.
+        return { kind: "unreachable", detail: outcome.detail };
+      }
+
+      // Anything else is one of this governor's OWN gates declining to go: the
+      // source is paused, or its allowance for the period is spent. That is a
+      // fact about us, not about the host, and AC7 scopes the fail-safe to "a
+      // server error or a network error", so it is neither of those. Recording
+      // it as unreachable would be wrong twice over: the cache is keyed by
+      // ORIGIN, so one source's spent allowance would disallow the host for
+      // every other source, and the entry would outlive the pause or the
+      // period that caused it by up to `robots.cacheBoundMs`.
+      //
+      // Nothing was learned, so nothing is decided and nothing is cached. The
+      // request is refused, with the reason that actually refused it - which
+      // is the same reason it would have met at the send itself.
+      return { kind: "refused", reason: outcome.reason, detail: outcome.detail };
     }
 
     const status = outcome.response.status;
