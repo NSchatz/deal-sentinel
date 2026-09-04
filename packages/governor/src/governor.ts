@@ -31,10 +31,33 @@
  *   6. the host's ceiling, its randomised delay and any back-pressure hold have
  *      all been satisfied.
  *
- * Gate 6 is a WAIT, and it can be as long as a whole ceiling interval, so gates
- * 3 and 4 are asked a second time on the far side of it. Both are statements
- * about a moment, and a request that spent an hour in a per-host queue is being
- * released in a different moment from the one that admitted it.
+ * GATE 6 IS A WAIT, and it is unbounded: a whole ceiling interval, or a
+ * `Retry-After` hold of hours, with every concurrent offer for that host
+ * serialised behind it. So a decision taken before that wait is a decision
+ * about a moment that has passed, and the boundary that matters is the one the
+ * spec uses everywhere - "before that request LEAVES THE PROCESS". Every gate
+ * above is therefore accounted for at that boundary, and this is the whole
+ * list, so that a gate cannot quietly be left at the call boundary again:
+ *
+ *   gate 1, the host ceiling: CONFIG. `#config` is assigned once in the
+ *     constructor from a frozen load and this class never writes it, so its
+ *     answer cannot change while a request waits. Re-read in `#send` anyway,
+ *     where its disappearance is a thrown invariant rather than a refusal.
+ *   gate 2, the source is configured: CONFIG, by the same argument, and it is
+ *     read out of the same object in the same statement style as gate 1. Not
+ *     re-asked; nothing can have changed it.
+ *   gate 3, the breaker: RE-ASKED in `#send` (a source can be paused by
+ *     another request's failure while this one waits).
+ *   gate 4, the allowance: RE-ASKED in `#send` (the period's units can be
+ *     spent by another request, or the period can roll, while this one waits).
+ *   gate 5, robots: RE-ASKED in `#send`. A cached robots decision carries an
+ *     explicit expiry - `robots.cacheBoundMs`, which RFC 9309 2.4 caps at 24
+ *     hours - so it is precisely a statement about a moment, and a request
+ *     released after that bound has elapsed must not leave under it.
+ *
+ * The URL's shape (absolute, http or https) is validated once in `request` and
+ * is not re-asked: it is a property of the caller's own argument, which no
+ * amount of waiting alters.
  *
  * Only then does a request leave, and the moment it leaves it is counted
  * against the source's allowance - whatever comes back.
@@ -89,6 +112,19 @@ export type GovernedResponse = {
 export type GovernorOutcome =
   | { ok: true; response: GovernedResponse; release: Release }
   | { ok: false; reason: RefusalReason; detail: string };
+
+/**
+ * How one send differs from the default. Both fields exist for the same single
+ * caller - the governor's own `/robots.txt` retrieval - and both are named
+ * rather than positional so that adding a third cannot silently change a
+ * second.
+ */
+type SendOptions = {
+  /** How this send's status maps to an outcome the breaker counts. */
+  classify?: (status: number) => OutcomeClass;
+  /** Ask gate 5 again at the process boundary. False only for gate 5's own fetch. */
+  recheckRobots?: boolean;
+};
 
 export type GovernorDependencies = {
   config: GovernorConfig;
@@ -187,25 +223,45 @@ export class Governor {
       };
     }
 
-    const paused = this.#breaker.status(request.sourceId);
-    if (paused.paused) {
-      return {
-        ok: false,
-        reason: "source-paused",
-        detail: `${request.sourceId} is paused by its breaker: ${paused.detail}`,
-      };
-    }
+    // Gates 3, 4 and 5, cheapest first, so that a source the breaker has
+    // already paused is never the reason a robots.txt gets fetched.
+    const breaker = this.#breakerGate(request.sourceId);
+    if (breaker !== null) return breaker;
 
-    const allowance = await this.#allowance.check(request.sourceId);
-    if (allowance.stopped) {
-      return {
-        ok: false,
-        reason: "allowance-exhausted",
-        detail: `${request.sourceId} is stopped for this period: ${allowance.detail}`,
-      };
-    }
+    const allowance = await this.#allowanceGate(request.sourceId);
+    if (allowance !== null) return allowance;
 
-    const robots = await this.#robots.decide(url, request.sourceId);
+    const robots = await this.#robotsGate(url, request.sourceId);
+    if (robots !== null) return robots;
+
+    return await this.#send(url, request);
+  }
+
+  /** Gate 3, in one place, so both boundaries ask exactly the same question. */
+  #breakerGate(sourceId: string): GovernorOutcome | null {
+    const paused = this.#breaker.status(sourceId);
+    if (!paused.paused) return null;
+    return {
+      ok: false,
+      reason: "source-paused",
+      detail: `${sourceId} is paused by its breaker: ${paused.detail}`,
+    };
+  }
+
+  /** Gate 4, likewise. */
+  async #allowanceGate(sourceId: string): Promise<GovernorOutcome | null> {
+    const allowance = await this.#allowance.check(sourceId);
+    if (!allowance.stopped) return null;
+    return {
+      ok: false,
+      reason: "allowance-exhausted",
+      detail: `${sourceId} is stopped for this period: ${allowance.detail}`,
+    };
+  }
+
+  /** Gate 5, likewise. Null means this path is allowed for this host, now. */
+  async #robotsGate(url: URL, sourceId: string): Promise<GovernorOutcome | null> {
+    const robots = await this.#robots.decide(url, sourceId);
     if (robots.state === "refused") {
       // Not a verdict about the host: one of THIS governor's gates refused the
       // robots retrieval on the far side of its own wait, so the request it was
@@ -219,8 +275,7 @@ export class Governor {
     if (robots.state === "disallowed") {
       return { ok: false, reason: "robots-disallowed", detail: robots.detail };
     }
-
-    return await this.#send(url, request);
+    return null;
   }
 
   /** Whether a host is currently held by back-pressure, for operator surfaces. */
@@ -231,8 +286,9 @@ export class Governor {
   async #send(
     url: URL,
     request: GovernedRequest,
-    classify: (status: number) => OutcomeClass = defaultOutcomeClass,
+    options: SendOptions = {},
   ): Promise<GovernorOutcome> {
+    const classify = options.classify ?? defaultOutcomeClass;
     const host = hostKey(url);
     const ceiling = this.#config.hosts[host];
     if (ceiling === undefined) {
@@ -243,35 +299,41 @@ export class Governor {
 
     const release = await this.#scheduler.release(host, ceiling);
 
-    // Gates 3 and 4 are asked AGAIN here, in the order `request` asks them,
-    // because the wait above is unbounded: it can be the whole ceiling
-    // interval, and the per-host queue serialises every concurrent offer
-    // behind it. A decision taken before that wait is a decision about a
-    // moment that has passed. So a request that queued behind the ceiling
-    // must not leave for a source the breaker has meanwhile PAUSED, and must
-    // not spend an allowance the period has meanwhile USED UP.
+    // ------------------------------------------------------------------------
+    // THE PROCESS BOUNDARY. Everything above happened at some earlier moment;
+    // this is the moment the request would leave. The wait is unbounded - a
+    // whole ceiling interval, or a `Retry-After` hold measured in hours - and
+    // the per-host queue serialises every concurrent offer behind it, so each
+    // gate whose answer can have changed is asked AGAIN here, and the module
+    // header names all five and says which those are.
     //
-    // The breaker half is the one that is easy to leave out, and leaving it
-    // out is what makes a paused source keep receiving one request every
-    // `minDelayMs` for as long as its queue holds them - which is precisely
-    // the "runaway scraper" this package exists to make unreachable.
-    const paused = this.#breaker.status(request.sourceId);
-    if (paused.paused) {
-      return {
-        ok: false,
-        reason: "source-paused",
-        detail: `${request.sourceId} is paused by its breaker: ${paused.detail}`,
-      };
+    // Gate 5 is asked FIRST, and the order is load-bearing rather than a
+    // matter of taste: re-asking robots can RETRIEVE `/robots.txt`, and that
+    // retrieval goes out through this same method, so it can spend the last
+    // unit of the period's allowance or hand the breaker the failure that
+    // pauses the source. Asked last, it would change the very state gates 3
+    // and 4 had just approved, and this request would leave anyway - the
+    // allowance overspent by one, or a paused source served once more. Asked
+    // first, its consequences are inside what gates 3 and 4 then read.
+    //
+    // Nothing is lost by asking the expensive gate first: the retrieval is
+    // itself a `#send`, so a paused source or a spent allowance refuses it
+    // before anything reaches the wire, and that refusal surfaces as the
+    // reason it actually is (`RobotsGate` caches no refusal).
+    if (options.recheckRobots ?? true) {
+      const robots = await this.#robotsGate(url, request.sourceId);
+      if (robots !== null) return robots;
     }
 
-    const allowance = await this.#allowance.check(request.sourceId);
-    if (allowance.stopped) {
-      return {
-        ok: false,
-        reason: "allowance-exhausted",
-        detail: `${request.sourceId} is stopped for this period: ${allowance.detail}`,
-      };
-    }
+    // Gate 3. Leaving this one out is what makes a paused source keep
+    // receiving one request every `minDelayMs` for as long as its queue holds
+    // them - precisely the "runaway scraper" this package exists to prevent.
+    const breaker = this.#breakerGate(request.sourceId);
+    if (breaker !== null) return breaker;
+
+    // Gate 4.
+    const allowance = await this.#allowanceGate(request.sourceId);
+    if (allowance !== null) return allowance;
 
     // Counted HERE, one line before the request leaves the process, so an
     // error, a 403 and a block are all counted exactly like a success.
@@ -330,10 +392,16 @@ export class Governor {
         // The parsing limit bounds what enters the process, at the socket.
         maxBytes: this.#config.robots.parsingLimitBytes,
       },
-      // A 4xx on robots.txt is the host ANSWERING - "this host carries no
-      // rules" - so it is not an error against the breaker. A 5xx, a timeout
-      // and a connection failure are.
-      robotsOutcomeClass,
+      {
+        // A 4xx on robots.txt is the host ANSWERING - "this host carries no
+        // rules" - so it is not an error against the breaker. A 5xx, a timeout
+        // and a connection failure are.
+        classify: robotsOutcomeClass,
+        // The ONE send that does not re-ask gate 5, for two reasons that agree:
+        // RFC 9309 puts no robots rule over `/robots.txt` itself, and a gate
+        // asked from inside its own retrieval would not terminate.
+        recheckRobots: false,
+      },
     );
 
     if (!outcome.ok) {

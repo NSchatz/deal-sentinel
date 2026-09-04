@@ -307,25 +307,35 @@ const COMPUTED_ACCESS = [GLOBAL_CLIENT, TRANSPORT_FACTORY, ...SOCKET_CLIENTS].ma
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".mts", ".cts", ".js", ".mjs", ".cjs"]);
 
-const SKIPPED_DIRECTORIES = new Set([
-  "node_modules",
-  ".git",
-  "dist",
-  "build",
-  "coverage",
-]);
+/**
+ * Not source at any depth, and there is no reading of "the tree" that includes
+ * them: `node_modules` is other people's code (and in a pnpm workspace it
+ * appears under every package, and is a symlink farm into a store), and `.git`
+ * is not text anybody wrote.
+ */
+const SKIPPED_ANYWHERE = new Set(["node_modules", ".git"]);
+
+/**
+ * The GENERATED OUTPUT, and only where a build actually puts it: the
+ * repository root. Matching these on the basename at any depth is what made
+ * `packages/adapters/src/build/client.ts` invisible to a criterion that says
+ * "anywhere in the tree" - a directory named `build` inside a package's `src`
+ * is hand-written source, and a bypass parked there would never be read.
+ */
+const SKIPPED_AT_ROOT = new Set(["dist", "build", "coverage"]);
 
 /** Every source file under `rootDir`, repository-relative, comments intact. */
 export function collectSourceFiles(rootDir: string): SourceFile[] {
   const files: SourceFile[] = [];
 
-  const walk = (directory: string): void => {
+  const walk = (directory: string, atRoot: boolean): void => {
     for (const entry of readdirSync(directory).sort()) {
-      if (SKIPPED_DIRECTORIES.has(entry)) continue;
+      if (SKIPPED_ANYWHERE.has(entry)) continue;
+      if (atRoot && SKIPPED_AT_ROOT.has(entry)) continue;
       const absolute = path.join(directory, entry);
       const stats = statSync(absolute);
       if (stats.isDirectory()) {
-        walk(absolute);
+        walk(absolute, false);
         continue;
       }
       if (!SOURCE_EXTENSIONS.has(path.extname(entry))) continue;
@@ -336,7 +346,7 @@ export function collectSourceFiles(rootDir: string): SourceFile[] {
     }
   };
 
-  walk(rootDir);
+  walk(rootDir, true);
   return files;
 }
 
@@ -414,6 +424,11 @@ export function describeRules(): { name: string; describe: string }[] {
  * every newline: a quote character inside a regular expression literal would
  * otherwise swallow the rest of the file, and a check that silently stops
  * looking is worse than no check at all.
+ *
+ * That state is deliberately NOT the pair-on-this-line rule `maskStringLiterals`
+ * uses, because here an unpaired quote can only ever leave a `//` unstripped -
+ * a comment read as code, which over-reports and is read by a human. It cannot
+ * hide anything, which is the failure the other pass had to be fixed for.
  */
 export function stripComments(text: string): string {
   let output = "";
@@ -512,11 +527,40 @@ export function normaliseComputedAccess(text: string): string {
  *
  * This is what lets the identifier rules say "the name may appear in exactly
  * one file" without firing on the word in a test title or an error message.
- * Regular expression literals are not parsed as such (telling one from a
- * division needs the grammar), so quote state RESETS at every newline exactly
- * as it does in `stripComments`: a line this misreads is one line, never the
- * rest of the file.
+ *
+ * Regular expression literals are not parsed as such - telling one from a
+ * division needs the grammar - so a quote character inside a character class,
+ * `/['"]/`, looks exactly like a string opening. That is why a quote only opens
+ * a string here if a matching one CLOSES it on the same line: a plain string
+ * cannot cross a newline, so an unpaired quote is not a string, and the view
+ * RESYNCHRONISES on it rather than blanking the rest of the line. Blanking was
+ * the losing direction. It hid whatever came after the quote, and what comes
+ * after `/[']/.test(url);` can be a bare call on the global client - the first
+ * item on the list of spellings this module claims none of survives review.
+ * Over-reading a line is a finding somebody reads; under-reading one is a
+ * bypass nobody does.
  */
+/**
+ * Does the quote character at `quoteIndex` have a partner before the end of its
+ * line? Backslash escapes are skipped, so `"a\"b"` closes at its third quote and
+ * not at its second.
+ */
+function closesOnThisLine(text: string, quoteIndex: number): boolean {
+  const quote = text[quoteIndex];
+  let index = quoteIndex + 1;
+  while (index < text.length) {
+    const character = text[index];
+    if (character === "\n") return false;
+    if (character === "\\") {
+      index += 2;
+      continue;
+    }
+    if (character === quote) return true;
+    index += 1;
+  }
+  return false;
+}
+
 export function maskStringLiterals(text: string): string {
   type Mode =
     | { kind: "code"; braces: number }
@@ -534,7 +578,12 @@ export function maskStringLiterals(text: string): string {
 
     if (mode.kind === "code") {
       if (character === '"' || character === "'") {
-        modes.push({ kind: "quoted", quote: character });
+        // Only a quote that is CLOSED on this line opens a string. An unpaired
+        // one is a character class, an apostrophe in a regular expression, or a
+        // typo - never a literal - and the view carries on reading code.
+        if (closesOnThisLine(text, index)) {
+          modes.push({ kind: "quoted", quote: character });
+        }
         output += character;
         index += 1;
         continue;

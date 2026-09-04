@@ -24,8 +24,14 @@ import { LIVE_TRANSPORT, ROBOTS_CACHE_BOUND_CEILING_MS } from "@deal-sentinel/go
 
 import { startLoopbackServer } from "../support/loopback-server.ts";
 import type { LoopbackServer } from "../support/loopback-server.ts";
-import { buildGovernor, testConfig } from "../support/governor-harness.ts";
-import { FakeClock } from "../support/fake-clock.ts";
+import {
+  buildGovernor,
+  productRequests,
+  recordingTransport,
+  testConfig,
+} from "../support/governor-harness.ts";
+import type { SentRequest } from "../support/governor-harness.ts";
+import { FakeClock, sequenceRandom } from "../support/fake-clock.ts";
 
 const CACHE_BOUND_MS = 6 * 60 * 60 * 1000;
 
@@ -154,5 +160,188 @@ describe("the robots decision is cached, and the cache is bounded", () => {
     // The configuration loader refuses anything above it; that refusal is
     // graded in governor-config.test.ts.
     assert.ok(CACHE_BOUND_MS < ROBOTS_CACHE_BOUND_CEILING_MS);
+  });
+});
+
+/**
+ * The same criterion at the PROCESS boundary, which is the boundary AC10's
+ * "before the next fetch to that host" names and the one the cases above do
+ * not reach: each of them offers its requests one at a time, so the moment the
+ * decision is taken and the moment the request leaves are the same moment.
+ *
+ * They are not the same moment when anything waits. The per-host queue
+ * serialises every concurrent offer behind the ceiling and the randomised
+ * delay, and a `Retry-After` can hold a host for hours, so a request admitted
+ * under a cached decision can leave long after the bound that decision carries
+ * has expired - and the configured bound is the governor's own statement of how
+ * long its answer stays true. Both halves of the criterion are graded here:
+ * expired means re-retrieve BEFORE the fetch, and inside the bound means do not.
+ *
+ * The transport is the recording stub and the clock is virtual, so nothing here
+ * opens a socket at all and six hours of holding cost nothing.
+ */
+const ALLOW_EVERYTHING = "User-agent: *\nDisallow:\n";
+const DISALLOW_EVERYTHING = "User-agent: *\nDisallow: /\n";
+
+/** A host that allows everything, then disallows everything from its second answer. */
+function changingHost(): (request: { url: string }) => { status: number; body: string } {
+  let served = 0;
+  return (request) => {
+    if (new URL(request.url).pathname !== "/robots.txt") {
+      return { status: 200, body: "a page would be here" };
+    }
+    served += 1;
+    return { status: 200, body: served === 1 ? ALLOW_EVERYTHING : DISALLOW_EVERYTHING };
+  };
+}
+
+function robotsRetrievals(sent: readonly SentRequest[]): SentRequest[] {
+  return sent.filter((request) => new URL(request.url).pathname === "/robots.txt");
+}
+
+/**
+ * For each request that left, how old the newest robots retrieval that preceded
+ * it was at that instant. This is the quantity the criterion bounds, and it is
+ * measured from the transport's own log rather than from the gate's opinion.
+ */
+function decisionAges(sent: readonly SentRequest[]): number[] {
+  const retrievals = robotsRetrievals(sent);
+  return productRequests(sent).map((request) => {
+    const current = retrievals.filter((retrieval) => retrieval.at <= request.at).pop();
+    assert.ok(current !== undefined, `${request.url} left before any robots retrieval`);
+    return request.at - current.at;
+  });
+}
+
+function queuedHostConfig(cacheBoundMs: number, minDelayMs: number) {
+  return testConfig({
+    hosts: {
+      "127.0.0.1": { maxRequests: 1_000, intervalMs: 60_000, minDelayMs, jitterMs: 1 },
+    },
+    robots: { cacheBoundMs },
+    // High enough that the breaker is never the reason for anything here.
+    breaker: {
+      windowMs: 6_000_000,
+      minimumOutcomes: 10_000,
+      failureRateThreshold: 0.5,
+      pauseMs: 3_600_000,
+    },
+    sources: { "test-source": {} },
+  });
+}
+
+describe("the cache bound holds where the request WAITS, not only where it is asked for", () => {
+  it("re-retrieves before releasing a request that outlived the bound in the queue", async () => {
+    const boundMs = 120_000;
+    const clock = new FakeClock();
+    const transport = recordingTransport(clock, changingHost());
+    const { governor } = buildGovernor({
+      transport,
+      config: queuedHostConfig(boundMs, 60_000),
+      clock,
+      random: sequenceRandom([0]),
+    });
+
+    // Five pages of one host offered at once, which is what an adapter with a
+    // page list does. All five decide robots at the same instant; the host
+    // releases one a minute, so the last of them leaves four minutes later.
+    const outcomes = await Promise.all(
+      ["/a", "/b", "/c", "/d", "/e"].map((path) =>
+        governor.request({ url: `http://127.0.0.1${path}`, sourceId: "test-source" }),
+      ),
+    );
+
+    for (const age of decisionAges(transport.sent)) {
+      assert.ok(
+        age < boundMs,
+        `a request left ${age}ms after the robots decision it left under, and ` +
+          `the configured bound is ${boundMs}ms`,
+      );
+    }
+
+    // And the point of re-retrieving: the rule the host added is OBEYED, so the
+    // queue empties into refusals rather than into requests.
+    assert.ok(
+      robotsRetrievals(transport.sent).length > 1,
+      "robots.txt was never re-retrieved, so the bound was not applied at the release",
+    );
+    assert.equal(outcomes[0].ok, true);
+    assert.deepEqual(
+      outcomes.slice(1).map((outcome) => (outcome.ok ? "ok" : outcome.reason)),
+      ["robots-disallowed", "robots-disallowed", "robots-disallowed", "robots-disallowed"],
+    );
+  });
+
+  it("re-retrieves before releasing one held past the bound by Retry-After", async () => {
+    const clock = new FakeClock();
+    const rules = changingHost();
+    let held = false;
+    const transport = recordingTransport(clock, (request) => {
+      if (new URL(request.url).pathname === "/robots.txt") return rules(request);
+      if (held) return { status: 200, body: "a page would be here" };
+      held = true;
+      // One header, asking for seven hours. The bound below is six, which is
+      // what `config/governor.json` ships.
+      return {
+        status: 503,
+        headers: { "retry-after": new Date(clock.now() + 7 * 3_600_000).toUTCString() },
+        body: "",
+      };
+    });
+    const { governor } = buildGovernor({
+      transport,
+      config: queuedHostConfig(CACHE_BOUND_MS, 1),
+      clock,
+      random: sequenceRandom([0]),
+    });
+
+    // No queue is needed for this one: a single hold outliving the bound is
+    // enough, and it is the shape a real host produces without being slow.
+    const [first, second] = await Promise.all(
+      ["/a", "/b"].map((path) =>
+        governor.request({ url: `http://127.0.0.1${path}`, sourceId: "test-source" }),
+      ),
+    );
+
+    for (const age of decisionAges(transport.sent)) {
+      assert.ok(
+        age < CACHE_BOUND_MS,
+        `a request left ${age}ms after its robots decision, past the ${CACHE_BOUND_MS}ms bound`,
+      );
+    }
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, false, "the held request left under the expired decision");
+    assert.equal(second.ok === false ? second.reason : "", "robots-disallowed");
+  });
+
+  it("does not re-retrieve at the release when the decision is still inside the bound", async () => {
+    // The other half of the criterion, and the one a fix could trample: five
+    // releases a minute apart, an hour-long bound, so every release is inside
+    // it and re-reading the file at each one would be traffic the host never
+    // asked for.
+    const clock = new FakeClock();
+    const transport = recordingTransport(clock, changingHost());
+    const { governor } = buildGovernor({
+      transport,
+      config: queuedHostConfig(3_600_000, 60_000),
+      clock,
+      random: sequenceRandom([0]),
+    });
+
+    const outcomes = await Promise.all(
+      ["/a", "/b", "/c", "/d", "/e"].map((path) =>
+        governor.request({ url: `http://127.0.0.1${path}`, sourceId: "test-source" }),
+      ),
+    );
+
+    assert.equal(
+      robotsRetrievals(transport.sent).length,
+      1,
+      "robots.txt was re-retrieved inside the configured cache bound",
+    );
+    assert.deepEqual(
+      outcomes.map((outcome) => outcome.ok),
+      [true, true, true, true, true],
+    );
   });
 });

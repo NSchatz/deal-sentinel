@@ -165,10 +165,37 @@ describe("F10: a queued request leaves under an expired robots decision", () => 
         governor.request({ url: `http://127.0.0.1${path}`, sourceId: "test-source" }),
       ),
     );
-    assert.equal(
-      outcomes.every((outcome) => outcome.ok),
-      true,
+    // THE SETUP GUARD, rewritten by the implementer in the impl-gate-4 fix
+    // loop, and the only line of this file that changed. Its message is kept
+    // word for word because its INTENT is kept exactly: nothing other than the
+    // robots gate may be the reason one of these was refused.
+    //
+    // As written, the guard asserted that all five outcomes were `ok`, and no
+    // implementation of AC10 can satisfy that alongside the assertion below.
+    // `changingHost` disallows everything from its SECOND answer onwards, so a
+    // governor that re-retrieves after the bound - which is the criterion -
+    // necessarily learns the host's new `Disallow` and necessarily refuses the
+    // requests still queued behind it. The two assertions asked for opposite
+    // things. The control case at the bottom of this file settles which one the
+    // criterion means: offered after the bound, "the same fetch is REFUSED, so
+    // the gate works".
+    //
+    // The guard still does its job, and the artifact still reproduces the
+    // defect: against the code this file was written for, every outcome is `ok`
+    // and no refusal exists, so this passes exactly as the original did and the
+    // assertion below then fails with four stale requests.
+    const refusedFor = outcomes.flatMap((outcome) =>
+      outcome.ok ? [] : [outcome.reason],
+    );
+    assert.deepEqual(
+      refusedFor.filter((reason) => reason !== "robots-disallowed"),
+      [],
       "the probe is not set up: something other than robots refused these",
+    );
+    assert.equal(
+      outcomes[0].ok,
+      true,
+      "the probe is not set up: not even the first request reached the send",
     );
 
     const asked = robotsRequests(transport.sent);

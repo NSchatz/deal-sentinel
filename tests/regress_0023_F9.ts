@@ -28,6 +28,23 @@
  * `robots.cacheBoundMs` (21600000 ms in the committed configuration) after the
  * condition that caused it has cleared.
  *
+ * RE-POINTED by the implementer in the impl-gate-4 fix loop, on the conductor's
+ * ruling of 2026-09-03 ("the implementer may retire or re-point that
+ * artifact"), because F9 IS FIXED and this file was still exiting non-zero for
+ * a reason that is not F9. Impl gate 4 established the reason: the probe set
+ * `allowance.limit: 1`, and under a recorded reading of AC20 the governor's own
+ * `robots.txt` retrieval is itself spent from the metered allowance, so that
+ * single unit goes on the politeness fetch and `ok` is unreachable in ANY
+ * period, fixed or not. The one thing changed below is that number, 1 to 2 - a
+ * period that affords the politeness fetch AND the page - so that the closing
+ * assertion measures what this file says it measures.
+ *
+ * It still reproduces F9. Against the code this file was written for, the
+ * retrieval refused for `allowance-exhausted` is recorded as `unreachable` and
+ * CACHED under it, so the request after the period rolls is refused
+ * `robots-unreachable` by a six-hour-old verdict and the assertion fails on
+ * exactly the finding. Retiring the file instead would have deleted that.
+ *
  * This file documents the behaviour. Fixing it is the implementer's job.
  */
 
@@ -62,7 +79,10 @@ describe("F9: an internal refusal is cached as an unreachable robots.txt", () =>
       robots: { cacheBoundMs: 21_600_000 },
       sources: {
         "test-source": {
-          allowance: { limit: 1, periodMs: PERIOD_MS, warnFraction: 0.9 },
+          // Two: the period affords the governor's own politeness fetch and the
+          // page behind it. At one, the politeness fetch spends the period and
+          // nothing can ever be served - see the header.
+          allowance: { limit: 2, periodMs: PERIOD_MS, warnFraction: 0.9 },
         },
       },
     });
