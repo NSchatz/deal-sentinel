@@ -78,7 +78,13 @@ place, and it is where every rule lives:
 - **An allowance per metered source**, counted centrally, warned once at the
   configured fraction, stopped (not slowed) at the allowance, and stored in
   PostgreSQL so a crash loop inside a period resumes the count instead of
-  spending it twice.
+  spending it twice. A unit is SPENT rather than checked: one statement in the
+  store takes it if and only if the resulting total is still inside the limit,
+  and the request leaves on that answer. Nothing reads the counter and decides,
+  because requests for one source on different hosts are not serialised with one
+  another - by design, so that one host at its ceiling never holds up another -
+  and a counter that is read and then written is overspent by however many of
+  them are offered at once.
 - **No second way out.** The package exports nothing that can send: a caller
   that wants the real HTTP client asks for the `LIVE_TRANSPORT` marker, which
   has no `send` and which only a `Governor` can redeem, on the far side of all

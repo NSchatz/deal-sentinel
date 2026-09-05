@@ -61,10 +61,24 @@
  *     read out of the same object in the same statement style as gate 1. Not
  *     re-asked; this class cannot have changed it.
  *   gate 3, the breaker: RE-ASKED INSIDE THE LOOP, after every wait (a source
- *     can be paused by another request's failure while this one waits).
- *   gate 4, the allowance: RE-ASKED INSIDE THE LOOP, after every wait (the
- *     period's units can be spent by another request, or the period can roll,
- *     while this one waits).
+ *     can be paused by another request's failure while this one waits), AND
+ *     AGAIN after the allowance reservation, because a concurrent request's
+ *     response can pause the source while that reservation is in flight. Its
+ *     state is in memory, so the second ask costs no `await`.
+ *   gate 4, the allowance: NOT ASKED AT ALL, at the boundary. It is SPENT. A
+ *     read of a shared counter is a statement about a moment even when it is
+ *     taken at the last possible instant, and this is the one gate whose subject
+ *     - the count of what has left - is moved by OTHER requests rather than by
+ *     the passage of time. Requests for one metered source on different hosts
+ *     are serialised by nothing, because AC4 forbids one host at its ceiling
+ *     from holding up another, so any number of them can read one total, all
+ *     find room, and all leave: the overspend would be bounded by how many hosts
+ *     an adapter offers at once and not by the configured allowance. So the
+ *     boundary does not read and then decide. It asks the STORE to take one unit
+ *     if and only if the resulting total is still inside the limit, in one
+ *     statement, and refuses on THAT answer. Nothing can happen between the
+ *     addition and the test, because they are the same step. `check` is still
+ *     asked earlier, but only to refuse cheaply: it never authorises a send.
  *   gate 5, robots: RE-ASKED INSIDE THE LOOP, and its answer's AGE is checked
  *     again at the end of each round, after gates 3 and 4 have run. A cached
  *     robots decision carries an explicit expiry - `robots.cacheBoundMs`, which
@@ -76,33 +90,49 @@
  *     further apart than the answer may live, so NO round can end fresh and
  *     asking again would only add traffic. `canRefreshRobots` in `#send` is
  *     that test, and where it is false the boundary re-asks gate 5 exactly once
- *     and then stops asking.
+ *     and then stops asking. Its age is checked ONCE MORE after the allowance
+ *     reservation, which is a store round trip a robots answer can expire
+ *     inside.
  *   gate 6, the wait itself: its answer is `HostScheduler.release`, and that
  *     answer is a statement about a moment too - the moment the host had
  *     received no traffic for `minDelayMs`, was inside its ceiling and was
  *     under no hold. `release` is the only reader of that hold, so anything
  *     that reaches the wire between it and `#transport.send` invalidates it.
  *     TAKEN AGAIN at the top of every round, so it is never older than the last
- *     thing that happened. A round ends only when nothing landed on the wire
- *     for this origin since that take and the host is under no hold.
+ *     thing that happened, and re-certified after the allowance reservation for
+ *     the same reason gate 5 is: a hold from another request's 429, or a
+ *     `/robots.txt` landing for this origin, can arrive inside that round trip.
+ *     A round ends only when nothing landed on the wire for this origin since
+ *     that take and the host is under no hold.
  *
- * Between the loop's exit and `#transport.send` there is one statement:
- * `#allowance.count`, which writes to the allowance store and issues no
- * request. Nothing there can wait on a host, so the instant the loop certified
- * is the instant the request leaves under.
+ * BETWEEN THE LAST GATE AND `#transport.send` THERE IS NO `await` AT ALL, and
+ * that is the property to preserve rather than any particular ordering above.
+ * The allowance reservation is the last thing that waits; every other gate is
+ * then RE-ASKED after it, synchronously, in one job that ends with the send. A
+ * reservation whose request is stopped there did not leave the process, so its
+ * unit goes back (`AllowanceLedger.release`) - AC20 counts what left, and an
+ * unreleased reservation would be an allowance quietly smaller than the
+ * configured one.
+ *
+ * Why this ordering and not the reverse: exactly one gate has to be innermost,
+ * because the allowance lives in a store and reaching a store is a wait. Making
+ * the ALLOWANCE innermost is what makes it exact, and it is the only gate that
+ * can be made exact no other way - the other three are read from memory, so
+ * re-asking them costs nothing and can be done with no `await` in hand.
  *
  * The URL's shape (absolute, http or https) is validated once in `request` and
  * is not re-asked: it is a property of the caller's own argument, which no
  * amount of waiting alters.
  *
- * Only then does a request leave, and the moment it leaves it is counted
- * against the source's allowance - whatever comes back.
+ * Only then does a request leave, and the unit it spent to leave is settled -
+ * the warning or the stop notification the resulting total owes - whatever came
+ * back.
  */
 
 import { hostKey } from "./config.ts";
 import type { BreakerSettings, GovernorConfig } from "./config.ts";
 import { AllowanceLedger } from "./allowance.ts";
-import type { AllowanceStore } from "./allowance.ts";
+import type { AllowanceReservation, AllowanceStore } from "./allowance.ts";
 import { Breaker } from "./breaker.ts";
 import type { OutcomeClass } from "./breaker.ts";
 import { InvalidRequestError } from "./errors.ts";
@@ -383,6 +413,59 @@ export class Governor {
     };
   }
 
+  /** `#boundaryRefusal` asked about right now, for the two places that give up. */
+  #boundaryRefusalNow(host: string, origin: string): GovernorOutcome {
+    return this.#boundaryRefusal(
+      host,
+      origin,
+      this.#clock.now(),
+      this.#scheduler.heldUntil(host),
+    );
+  }
+
+  /**
+   * Do gate 5's and gate 6's answers both hold AT THIS INSTANT?
+   *
+   * Spelled once and asked twice - before the allowance reservation, to avoid
+   * paying for one that another round would only give back, and again after it,
+   * where the answer is the one the request actually leaves under. Reads nothing
+   * but memory and takes no `await`, which is what lets the second ask sit
+   * between the reservation and the wire with nothing able to run in between.
+   *
+   * `landedRetrievals` is compared against where this origin stood when gate 6
+   * granted the release, so a `/robots.txt` that reached the wire since - this
+   * request's own re-ask, or another request that joined the same retrieval -
+   * makes the answer false however it got there.
+   */
+  #boundaryHolds(
+    host: string,
+    origin: string,
+    landedBefore: number,
+    recheckRobots: boolean,
+    canRefreshRobots: boolean,
+  ): boolean {
+    const now = this.#clock.now();
+
+    // Gate 6's answer still stands: nothing landed on the wire for this origin
+    // since the release was granted, and no hold has arrived from anywhere else.
+    // (`release` is the only reader of `holdUntil`, and it returned before
+    // either could happen.)
+    const gate6Current =
+      this.#robots.landedRetrievals(origin) === landedBefore &&
+      this.#scheduler.heldUntil(host) <= now;
+    if (!gate6Current) return false;
+
+    // Gate 5's answer is still inside the bound it carries.
+    if (!recheckRobots || this.#robots.decidedWithinBoundAt(origin, now)) return true;
+
+    // Gate 5 is not fresh, but no round could make it so: this configuration
+    // spaces two requests to this host further apart than a robots decision may
+    // live. The boundary has re-asked gate 5 once, which is the freshest answer
+    // that exists here; asking again would fetch `/robots.txt` once more and
+    // land in exactly the same place, one request to the host worse off.
+    return !canRefreshRobots;
+  }
+
   async #send(
     url: URL,
     request: GovernedRequest,
@@ -413,6 +496,7 @@ export class Governor {
       recheckRobots && ceiling.minDelayMs < this.#config.robots.cacheBoundMs;
 
     let release: Release;
+    let reservation: AllowanceReservation;
     let round = 0;
 
     for (;;) {
@@ -421,6 +505,13 @@ export class Governor {
       // GATE 6: the wait. Taken again at the top of every round, so that its
       // answer is never older than the last thing that happened to this host.
       release = await this.#scheduler.release(host, ceiling);
+
+      // Where this origin's retrievals stand at the moment the release was
+      // granted. Everything from here to the wire is measured against it: gate
+      // 5's own re-ask can put a `/robots.txt` on the wire for this host, and so
+      // can another request that joined the same retrieval while this one waits
+      // for its allowance reservation.
+      const landedBefore = this.#robots.landedRetrievals(origin);
 
       // ----------------------------------------------------------------------
       // THE PROCESS BOUNDARY. Everything before this round happened at some
@@ -443,17 +534,9 @@ export class Governor {
       // itself a `#send`, so a paused source or a spent allowance refuses it
       // before anything reaches the wire, and that refusal surfaces as the
       // reason it actually is (`RobotsGate` caches no refusal).
-      let landedTraffic = false;
       if (recheckRobots && (round === 1 || canRefreshRobots)) {
-        // Gate 5's re-ask is the ONE thing between gate 6's answer and the wire
-        // that can put a request on the wire itself, so record where this
-        // origin's retrievals stand before asking it.
-        const landedBefore = this.#robots.landedRetrievals(origin);
-
         const robots = await this.#robotsGate(url, request.sourceId);
         if (robots !== null) return robots;
-
-        landedTraffic = this.#robots.landedRetrievals(origin) !== landedBefore;
       }
 
       // Gate 3. Leaving this one out is what makes a paused source keep
@@ -462,46 +545,64 @@ export class Governor {
       const breaker = this.#breakerGate(request.sourceId);
       if (breaker !== null) return breaker;
 
-      // Gate 4.
+      // Gate 4, ADVISORY. A source already finished for the period is turned
+      // away here, before this round spends anything - and, on round 1, before
+      // the robots retrieval above would have been paid for on its behalf. It
+      // can only refuse. What AUTHORISES the send is the reservation below.
       const allowance = await this.#allowanceGate(request.sourceId);
       if (allowance !== null) return allowance;
 
       // IS EVERY ANSWER ABOVE TRUE AT ONE INSTANT - THIS ONE? Read after gates
       // 3 and 4 rather than before them, because those two read a store and
       // reading a store takes time, and the question here is about NOW.
-      const now = this.#clock.now();
-      const heldUntil = this.#scheduler.heldUntil(host);
-
-      // Gate 6's answer still stands: the re-ask above put nothing on the wire
-      // for this origin, and no hold has arrived from anywhere else since the
-      // release was granted. (`release` is the only reader of `holdUntil`, and
-      // it returned before either could happen.)
-      const gate6Current = !landedTraffic && heldUntil <= now;
-
-      // Gate 5's answer is still inside the bound it carries.
-      const gate5Fresh =
-        !recheckRobots || this.#robots.decidedWithinBoundAt(origin, now);
-
-      if (gate6Current && gate5Fresh) break;
-
-      // Gate 6 is current and gate 5 is not, but no round could make it so:
-      // this configuration spaces two requests to this host further apart than
-      // a robots decision may live. The boundary has re-asked gate 5 once, at
-      // this boundary, which is the freshest answer that exists here; asking
-      // again would fetch `/robots.txt` once more and land in exactly the same
-      // place, one request to the host worse off.
-      if (gate6Current && !canRefreshRobots) break;
-
-      if (round >= MAX_BOUNDARY_WAITS) {
-        return this.#boundaryRefusal(host, origin, now, heldUntil);
+      if (!this.#boundaryHolds(host, origin, landedBefore, recheckRobots, canRefreshRobots)) {
+        if (round >= MAX_BOUNDARY_WAITS) return this.#boundaryRefusalNow(host, origin);
+        continue;
       }
+
+      // GATE 4, BINDING, and the last thing in this method that waits. One
+      // statement in the store takes a unit if and only if the resulting total
+      // is still inside the configured allowance, and answers with that total.
+      // A concurrent request for this source on another host cannot have taken
+      // the same unit, because it cannot get between the addition and the test.
+      reservation = await this.#allowance.reserve(request.sourceId);
+      if (reservation.refused) {
+        return {
+          ok: false,
+          reason: "allowance-exhausted",
+          detail: `${request.sourceId} is stopped for this period: ${reservation.detail}`,
+        };
+      }
+
+      // ----------------------------------------------------------------------
+      // NO `await` FROM HERE TO `#transport.send`. The reservation was a store
+      // round trip and the other gates read memory, so they are re-asked now,
+      // in this same job, and the answers cannot go stale before the request
+      // leaves: nothing else can run in between.
+      const paused = this.#breakerGate(request.sourceId);
+      if (paused !== null) {
+        // A concurrent request's response paused this source while the
+        // reservation was in flight. Nothing leaves, so the unit goes back, and
+        // no further round is taken: a pause is not something waiting fixes.
+        await this.#allowance.release(reservation);
+        return paused;
+      }
+
+      if (this.#boundaryHolds(host, origin, landedBefore, recheckRobots, canRefreshRobots)) {
+        break;
+      }
+
+      // A hold arrived, a `/robots.txt` landed for this origin, or the robots
+      // decision expired, all inside the reservation's round trip. Nothing
+      // leaves under any of those, so the unit goes back before another round.
+      await this.#allowance.release(reservation);
+      if (round >= MAX_BOUNDARY_WAITS) return this.#boundaryRefusalNow(host, origin);
     }
 
-    // Counted HERE, one line before the request leaves the process, so an
-    // error, a 403 and a block are all counted exactly like a success.
-    await this.#allowance.count(request.sourceId);
-
-    let response: TransportResponse;
+    // Null until the transport answers, so that the settlement below runs on
+    // both paths without being written twice.
+    let response: TransportResponse | null = null;
+    let failure: unknown = null;
     try {
       response = await this.#transport.send({
         url: url.href,
@@ -514,7 +615,19 @@ export class Governor {
         maxBytes: request.maxBytes ?? this.#config.http.maxResponseBytes,
       });
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+      failure = error;
+    }
+
+    // The request LEFT THE PROCESS, so the unit it spent is settled - the
+    // warning or the stop notification the resulting total owes, each at most
+    // once for the period. Settled after the send rather than before it because
+    // AC20 counts a request that left whatever came back, and because emitting
+    // from the reservation would have put two more store round trips between
+    // that reservation and the wire.
+    await this.#allowance.settle(reservation);
+
+    if (response === null) {
+      const detail = failure instanceof Error ? failure.message : String(failure);
       await this.#recordOutcome(request.sourceId, "failure");
       return {
         ok: false,

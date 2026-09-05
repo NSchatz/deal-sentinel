@@ -6,6 +6,13 @@
  * survive a crash inside an allowance period uses the durable store in
  * `allowance-store-postgres.ts`; this one is here so a unit test does not need
  * a container to assert the warn, the stop and the period roll.
+ *
+ * ATOMICITY, which the port requires of every implementation: every method below
+ * runs to completion inside one job, with no `await` between reading a record
+ * and writing it. JavaScript runs one job at a time, so no other request can be
+ * interleaved there and `reserve` adds and tests indivisibly - the same
+ * guarantee the PostgreSQL store buys with a single statement. An `await` added
+ * inside one of these bodies would silently remove it.
  */
 
 import type { AllowanceRecord, AllowanceStore } from "./allowance.ts";
@@ -42,10 +49,20 @@ export function createMemoryAllowanceStore(): AllowanceStore {
     async read(sourceId, periodStart) {
       return { ...at(sourceId, periodStart) };
     },
-    async consume(sourceId, periodStart, amount) {
+    async reserve(sourceId, periodStart, amount, limit) {
       const record = at(sourceId, periodStart);
+      if (record.consumed + amount > limit) {
+        return { granted: false, consumed: record.consumed };
+      }
       record.consumed += amount;
-      return { ...record };
+      return { granted: true, consumed: record.consumed };
+    },
+    async release(sourceId, periodStart, amount) {
+      const record = at(sourceId, periodStart);
+      // Never below zero, matching the durable store's check constraint. A
+      // release with no reservation behind it is a caller bug, and clamping
+      // keeps it from becoming an allowance larger than the configured one.
+      record.consumed = Math.max(0, record.consumed - amount);
     },
     async markWarned(sourceId, periodStart, when) {
       const record = at(sourceId, periodStart);

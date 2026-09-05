@@ -40,7 +40,13 @@ export type {
 export { GovernorConfigError, InvalidRequestError } from "./errors.ts";
 
 export { AllowanceLedger, periodStartFor } from "./allowance.ts";
-export type { AllowanceRecord, AllowanceStore, AllowanceVerdict } from "./allowance.ts";
+export type {
+  AllowanceRecord,
+  AllowanceReservation,
+  AllowanceReservationRecord,
+  AllowanceStore,
+  AllowanceVerdict,
+} from "./allowance.ts";
 export { createMemoryAllowanceStore } from "./allowance-store-memory.ts";
 export { createPostgresAllowanceStore } from "./allowance-store-postgres.ts";
 
