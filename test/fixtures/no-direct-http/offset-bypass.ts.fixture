@@ -1,0 +1,8 @@
+/*
+ * A block comment above the bypass, so the reported line number has something
+ * to be wrong about. The call site is on line 7 of this file.
+ */
+
+export async function read(url: string): Promise<Response> {
+  return await fetch(url);
+}

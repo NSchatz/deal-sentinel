@@ -1,0 +1,16 @@
+// A socket and a request line are an HTTP client that names no HTTP client.
+// The host ceiling, the randomised delay, the robots decision, the
+// back-pressure hold, the breaker and the allowance are all skipped in the same
+// step, and the bytes on the wire are indistinguishable from a governed
+// request at the other end.
+
+import net from "node:net";
+import tls from "node:tls";
+
+export function price(host: string, path: string): void {
+  const plain = net.connect(80, host);
+  plain.write("GET " + path + " HTTP/1.1\r\nHost: " + host + "\r\n\r\n");
+
+  const secure = tls.connect(443, { host });
+  secure.write("GET " + path + " HTTP/1.1\r\nHost: " + host + "\r\n\r\n");
+}

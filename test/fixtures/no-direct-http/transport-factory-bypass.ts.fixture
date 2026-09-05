@@ -1,0 +1,23 @@
+// The bypass that needs no HTTP client, no new dependency and no clever
+// spelling: one import of the governor package's own name for the thing that
+// builds a live client, and a send.
+//
+// The factory is no longer exported from `packages/governor/src/index.ts`, so
+// this import does not even resolve. It is still reported, because "it does not
+// resolve today" is present-day absence and AC2 asks for unreachability: the
+// day somebody re-exports it, this line has to fail the suite on its own.
+
+import { createFetchTransport } from "@deal-sentinel/governor";
+
+const transport = createFetchTransport();
+
+export async function priceOf(url: string): Promise<string> {
+  const response = await transport.send({
+    url,
+    method: "GET",
+    headers: {},
+    timeoutMs: 5000,
+    maxBytes: 1048576,
+  });
+  return response.body;
+}

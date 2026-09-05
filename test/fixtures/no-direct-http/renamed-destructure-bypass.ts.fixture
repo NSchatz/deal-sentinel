@@ -1,0 +1,11 @@
+// A renamed destructure leaves no bare call and no dotted global anywhere: the
+// call site reads `send(url)`. What it does leave is the identifier, once, as
+// the key of the destructuring pattern - which is a resolution of it, and is
+// therefore a finding.
+
+const { fetch: send } = global;
+
+export async function currentPrice(listingUrl: string): Promise<number> {
+  const response = await send(listingUrl);
+  return (await response.text()).length;
+}

@@ -14,6 +14,9 @@ importers:
       '@deal-sentinel/extractor':
         specifier: '*'
         version: link:packages/extractor
+      '@deal-sentinel/governor':
+        specifier: '*'
+        version: link:packages/governor
       '@deal-sentinel/shared':
         specifier: '*'
         version: link:packages/shared
@@ -50,6 +53,21 @@ importers:
       '@deal-sentinel/shared':
         specifier: '*'
         version: link:../shared
+
+  packages/governor:
+    dependencies:
+      '@deal-sentinel/db':
+        specifier: '*'
+        version: link:../db
+      '@deal-sentinel/shared':
+        specifier: '*'
+        version: link:../shared
+      drizzle-orm:
+        specifier: 0.38.3
+        version: 0.38.3(@types/pg@8.11.10)(pg@8.13.1)
+      pg:
+        specifier: 8.13.1
+        version: 8.13.1
 
   packages/shared: {}
 

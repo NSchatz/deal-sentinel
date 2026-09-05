@@ -1,17 +1,24 @@
 /**
  * The price history schema.
  *
- * Two tables, and both of them are load-bearing:
+ * Three tables, and all of them are load-bearing:
  *
- *   `price_observations`     one row per listing per run, kept indefinitely.
- *                            History accrues at one observation per listing per
- *                            run and cannot be backfilled, so every column the
- *                            phase names is here now rather than as a migration
- *                            over the largest table in the system later.
- *   `history_initialization` the completed-initialization marker. Its presence
- *                            is what the ordinary start path checks; its
- *                            presence is also what the one-time initialization
- *                            action refuses to run past.
+ *   `price_observations`       one row per listing per run, kept indefinitely.
+ *                              History accrues at one observation per listing
+ *                              per run and cannot be backfilled, so every
+ *                              column the phase names is here now rather than
+ *                              as a migration over the largest table in the
+ *                              system later.
+ *   `history_initialization`   the completed-initialization marker. Its
+ *                              presence is what the ordinary start path checks;
+ *                              its presence is also what the one-time
+ *                              initialization action refuses to run past.
+ *   `governor_allowance_usage` how much of a metered source's allowance the
+ *                              current period has spent, and whether the one
+ *                              warning and the one stop notification for that
+ *                              period have been sent. Durable because a crash
+ *                              loop inside a period is exactly how a free
+ *                              allowance gets burned twice.
  */
 
 import {
@@ -21,6 +28,7 @@ import {
   index,
   integer,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   varchar,
@@ -168,6 +176,49 @@ export const historyInitialization = pgTable(
   ],
 );
 
+/**
+ * The governor's allowance counter, one row per metered source per period.
+ *
+ * The primary key is (source, period start), so a new period is a new row and
+ * "counting from zero for the new period" is a property of the key rather than
+ * of a reset somebody has to remember to run. `warned_at` and `stopped_at` hold
+ * the "exactly once per period" promise across a restart: an in-memory flag
+ * would send the second warning at exactly the moment - a crash loop - when the
+ * owner least needs two.
+ */
+export const governorAllowanceUsage = pgTable(
+  "governor_allowance_usage",
+  {
+    /** The source the allowance belongs to, e.g. "bestbuy-api". */
+    sourceId: text("source_id").notNull(),
+    /** The instant the current allowance period began, aligned to the epoch. */
+    periodStart: timestamp("period_start", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    /**
+     * Requests that LEFT THE PROCESS in this period, whatever came back. An
+     * error, a 403 and a block each consumed the allowance.
+     */
+    consumed: integer("consumed").notNull().default(0),
+    /** When the single warn-fraction notification for this period was emitted. */
+    warnedAt: timestamp("warned_at", { withTimezone: true, mode: "date" }),
+    /** When the single stop notification for this period was emitted. */
+    stoppedAt: timestamp("stopped_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    primaryKey({
+      name: "governor_allowance_usage_pkey",
+      columns: [table.sourceId, table.periodStart],
+    }),
+    check(
+      "governor_allowance_usage_consumed_non_negative",
+      sql`${table.consumed} >= 0`,
+    ),
+  ],
+);
+
 export type PriceObservationRow = typeof priceObservations.$inferSelect;
 export type NewPriceObservationRow = typeof priceObservations.$inferInsert;
 export type InitializationMarkerRow = typeof historyInitialization.$inferSelect;
+export type GovernorAllowanceUsageRow = typeof governorAllowanceUsage.$inferSelect;

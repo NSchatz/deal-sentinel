@@ -1,0 +1,11 @@
+// Two globals that open their own connection to a URL: an HTTP upgrade and a
+// long-lived GET that stays open. Neither is the client the first rule names,
+// neither is imported from anywhere, and both leave the process on their own.
+
+export function watch(url: string): void {
+  const upgraded = new WebSocket(url);
+  upgraded.addEventListener("message", () => undefined);
+
+  const streamed = new EventSource(url);
+  streamed.onmessage = () => undefined;
+}

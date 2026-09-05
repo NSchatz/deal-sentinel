@@ -37,10 +37,12 @@ export type { InitializationMarker } from "./start-check.ts";
 
 export {
   RAW_CONTEXT_MAX_CHARS,
+  governorAllowanceUsage,
   historyInitialization,
   priceObservations,
 } from "./schema.ts";
 export type {
+  GovernorAllowanceUsageRow,
   InitializationMarkerRow,
   NewPriceObservationRow,
   PriceObservationRow,

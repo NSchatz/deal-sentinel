@@ -1,0 +1,18 @@
+// The other half of the property, and the reason the identifier rules read a
+// CODE VIEW rather than the raw text: this file says the word in strings, in a
+// test title and in an error message, and performs nothing. A check that fires
+// on prose is a check somebody switches off, and a switched-off check is worse
+// than none.
+
+export const title = "the rules of the group that applies decide every fetch";
+
+export const failure =
+  "the process refuses to start rather than fetch anything on a built-in " +
+  "default, because a default buried in code is a decision with nobody's name " +
+  "on it";
+
+export const packages = ["node-fetch", "fetch-call", "prefetch", "fetchAll"];
+
+export function describeRule(): string {
+  return `the fetch rule reports ${packages.length} names it does not own`;
+}

@@ -1,0 +1,13 @@
+// The same bypass, reached through `global` - Node's own long-standing alias
+// for `globalThis`, defined in every process this repository runs in, and
+// shorter to type than the spelling a check built on a list of names catches.
+//
+// This fixture exists because AC2 is graded on UNREACHABILITY. A check that
+// enumerates global names catches the names somebody thought of; the identifier
+// resolves the same way through every one of them.
+
+export async function currentPrice(listingUrl: string): Promise<number> {
+  const response = await global.fetch(listingUrl);
+  const markup = await response.text();
+  return markup.length;
+}

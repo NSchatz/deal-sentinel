@@ -1,0 +1,7 @@
+// Never call fetch( here: ask the governor for the request instead.
+/* An import of node:https, or of undici, belongs in exactly one module:
+   packages/governor/src/transport.ts. Writing `import https from "node:https"`
+   in this file would be the bypass. */
+
+export const note =
+  "this file mentions every forbidden shape and performs none of them";

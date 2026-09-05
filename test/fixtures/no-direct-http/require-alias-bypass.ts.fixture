@@ -1,0 +1,22 @@
+// A module specifier reached through a call the import rules do not spell.
+// `createRequire` hands back `require` itself, and calling the value it returns
+// reaches the same modules `client-import` already enumerates with no `from`,
+// no bare `require(` and no `import(` at the head of the line: structurally the
+// F1 shape one level up, where the list was complete and the way in was not.
+//
+// The second pair parks the specifier in a variable first, which is the same
+// move again with the string one line further away from the call.
+
+import { createRequire } from "node:module";
+
+const load = createRequire(import.meta.url);
+
+const client = createRequire(import.meta.url)("node:http");
+
+const parked = "node:https";
+const secureClient = load(parked);
+
+export function price(host: string, path: string): void {
+  client.get({ host, path });
+  secureClient.get({ host, path });
+}

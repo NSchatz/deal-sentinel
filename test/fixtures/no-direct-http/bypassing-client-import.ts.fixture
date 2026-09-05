@@ -1,0 +1,15 @@
+// The other shape of the same bypass: a second HTTP client, imported and used
+// directly. A check that only looked for `fetch(` would pass this file and the
+// governor would have a second way out of the process.
+
+import { request } from "undici";
+import https from "node:https";
+
+export async function fetchListing(url: string): Promise<string> {
+  const { body } = await request(url);
+  return await body.text();
+}
+
+export function legacyFetch(url: string): void {
+  https.get(url, () => undefined);
+}

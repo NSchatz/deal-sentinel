@@ -1,0 +1,11 @@
+// The request leaves through another process, so nothing in this file names a
+// client at all. What is reported is the PROGRAM, not `node:child_process`:
+// this repository runs `docker` and `pg_restore` from three test files for
+// reasons that have nothing to do with fetching, and allowlisting those for
+// "may run any program" would be a wider hole than the one it closed.
+
+import { execSync } from "node:child_process";
+
+export function price(url: string): string {
+  return execSync("curl -s " + url).toString();
+}
