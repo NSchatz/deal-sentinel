@@ -36,16 +36,20 @@
  * serialised behind it. So a decision taken before that wait is a decision
  * about a moment that has passed, and the boundary that matters is the one the
  * spec uses everywhere - "before that request LEAVES THE PROCESS". Every gate
- * above is therefore accounted for at that boundary, and this is the whole
- * list, so that a gate cannot quietly be left at the call boundary again:
+ * is therefore accounted for at that boundary, gate 6 included, and this is the
+ * whole list, so that a gate cannot quietly be left on the wrong side of the
+ * wait again:
  *
- *   gate 1, the host ceiling: CONFIG. `#config` is assigned once in the
- *     constructor from a frozen load and this class never writes it, so its
- *     answer cannot change while a request waits. Re-read in `#send` anyway,
- *     where its disappearance is a thrown invariant rather than a refusal.
+ *   gate 1, the host ceiling: CONFIG. `#config` is `readonly`, is assigned
+ *     exactly once in the constructor, and every other mention of it in this
+ *     class is a read, so its answer cannot change while a request waits. (The
+ *     object itself is the caller's and is not deep-frozen; the guarantee here
+ *     is that this class never writes it, which is the guarantee this gate
+ *     needs.) Re-read in `#send` anyway, where its disappearance is a thrown
+ *     invariant rather than a refusal.
  *   gate 2, the source is configured: CONFIG, by the same argument, and it is
  *     read out of the same object in the same statement style as gate 1. Not
- *     re-asked; nothing can have changed it.
+ *     re-asked; this class cannot have changed it.
  *   gate 3, the breaker: RE-ASKED in `#send` (a source can be paused by
  *     another request's failure while this one waits).
  *   gate 4, the allowance: RE-ASKED in `#send` (the period's units can be
@@ -54,6 +58,16 @@
  *     explicit expiry - `robots.cacheBoundMs`, which RFC 9309 2.4 caps at 24
  *     hours - so it is precisely a statement about a moment, and a request
  *     released after that bound has elapsed must not leave under it.
+ *   gate 6, the wait itself: its answer is `HostScheduler.release`, and that
+ *     answer is a statement about a moment too - the moment the host had
+ *     received no traffic for `minDelayMs`, was inside its ceiling and was
+ *     under no hold. `release` is the only reader of that hold, so anything
+ *     that reaches the wire between it and `#transport.send` invalidates it.
+ *     Exactly one thing there can: gate 5's re-ask, which retrieves
+ *     `/robots.txt` through this same method. So gate 6 is TAKEN AGAIN in
+ *     `#send` whenever that re-ask landed a retrieval for this origin, or the
+ *     host is under a hold at that point for any other reason. Past that
+ *     re-take, nothing between here and the wire can issue a request.
  *
  * The URL's shape (absolute, http or https) is validated once in `request` and
  * is not re-asked: it is a property of the caller's own argument, which no
@@ -297,7 +311,7 @@ export class Governor {
       );
     }
 
-    const release = await this.#scheduler.release(host, ceiling);
+    let release = await this.#scheduler.release(host, ceiling);
 
     // ------------------------------------------------------------------------
     // THE PROCESS BOUNDARY. Everything above happened at some earlier moment;
@@ -305,7 +319,7 @@ export class Governor {
     // whole ceiling interval, or a `Retry-After` hold measured in hours - and
     // the per-host queue serialises every concurrent offer behind it, so each
     // gate whose answer can have changed is asked AGAIN here, and the module
-    // header names all five and says which those are.
+    // header names all six and says which those are.
     //
     // Gate 5 is asked FIRST, and the order is load-bearing rather than a
     // matter of taste: re-asking robots can RETRIEVE `/robots.txt`, and that
@@ -321,8 +335,41 @@ export class Governor {
     // before anything reaches the wire, and that refusal surfaces as the
     // reason it actually is (`RobotsGate` caches no refusal).
     if (options.recheckRobots ?? true) {
+      // Gate 5's re-ask is the ONE thing between gate 6's answer and the wire
+      // that can put a request on the wire itself, so record where this
+      // origin's retrievals stand before asking it.
+      const origin = url.origin;
+      const landedBefore = this.#robots.landedRetrievals(origin);
+
       const robots = await this.#robotsGate(url, request.sourceId);
       if (robots !== null) return robots;
+
+      // GATE 6 AGAIN. If that re-ask went to the wire for this host - its own
+      // retrieval, or one it joined - then the release above was granted
+      // BEFORE traffic this governor itself sent, and every hold, ceiling slot
+      // and minimum delay that traffic earned is invisible to it: `release` is
+      // the only reader of `holdUntil` and it had already returned. So gate 6
+      // is asked again, and the answer this request leaves under is the second
+      // one. The `heldUntil` test alongside it catches the same staleness
+      // arriving from a concurrent request rather than from this one.
+      //
+      // Asked again ONCE and not in a loop, deliberately. After this point
+      // nothing between here and `#transport.send` can issue a request - gates
+      // 3 and 4 read the breaker and the allowance store, and the allowance
+      // count writes to it - so one re-ask is enough to make gate 6's answer
+      // current at the wire. Looping instead would mean alternating gate 5 and
+      // gate 6 until both were satisfied at one instant, and where a host
+      // holds for longer than `robots.cacheBoundMs` no such instant exists:
+      // every refreshed robots decision expires inside the hold it earns, and
+      // the loop answers a host that has just asked for less traffic with an
+      // unbounded stream of `/robots.txt` fetches. See `## Readings taken` in
+      // the spec's notes.md, reading 34.
+      if (
+        this.#robots.landedRetrievals(origin) !== landedBefore ||
+        this.#scheduler.heldUntil(host) > this.#clock.now()
+      ) {
+        release = await this.#scheduler.release(host, ceiling);
+      }
     }
 
     // Gate 3. Leaving this one out is what makes a paused source keep

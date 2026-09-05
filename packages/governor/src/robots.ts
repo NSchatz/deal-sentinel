@@ -81,6 +81,25 @@ export class RobotsGate {
   /** How many times this gate has actually gone to the network, for the cache test. */
   retrievals = 0;
 
+  readonly #landed = new Map<string, number>();
+
+  /**
+   * How many retrievals for this origin have LANDED - come back off the wire -
+   * counted once each, and visible to the caller that started the retrieval and
+   * to every caller that joined it.
+   *
+   * `retrievals` above counts attempts as they START, which is the question the
+   * cache criterion asks. This counts them as they FINISH, which is the
+   * question the governor has to ask on the far side of its per-host wait: "did
+   * asking this gate just put a request on the wire for this host?" A caller
+   * that joined an in-flight retrieval never started one, and the answer for it
+   * is just as much yes: the host received a request either way, and any
+   * back-pressure that request earned is just as binding on the joiner.
+   */
+  landedRetrievals(origin: string): number {
+    return this.#landed.get(origin) ?? 0;
+  }
+
   async decide(url: URL, sourceId: string): Promise<RobotsDecision> {
     const origin = url.origin;
     const entry = await this.#entryFor(origin, sourceId);
@@ -170,6 +189,13 @@ export class RobotsGate {
   async #retrieveAndCache(origin: string, sourceId: string): Promise<CacheEntry> {
     this.retrievals += 1;
     const retrieval = await this.#retrieve(origin, sourceId);
+    // Counted BEFORE this promise resolves, so that the caller that started the
+    // retrieval and every caller that joined it all observe the increment when
+    // their own `decide` returns. A refusal is counted too: `refused` means one
+    // of the governor's own gates declined to go, but by then the retrieval may
+    // already have been through the wait and the wire for an earlier attempt,
+    // and counting it can only make a caller re-ask a gate it did not have to.
+    this.#landed.set(origin, (this.#landed.get(origin) ?? 0) + 1);
     const fetchedAt = this.#clock.now();
 
     const entry: CacheEntry =

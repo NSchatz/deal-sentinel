@@ -27,8 +27,14 @@ import { LIVE_TRANSPORT, holdForResponse, readRetryAfter } from "@deal-sentinel/
 
 import { startLoopbackServer } from "../support/loopback-server.ts";
 import type { LoopbackServer } from "../support/loopback-server.ts";
-import { buildGovernor, testConfig } from "../support/governor-harness.ts";
-import { FakeClock } from "../support/fake-clock.ts";
+import {
+  buildGovernor,
+  productRequests,
+  recordingTransport,
+  testConfig,
+} from "../support/governor-harness.ts";
+import type { SentRequest } from "../support/governor-harness.ts";
+import { FakeClock, sequenceRandom } from "../support/fake-clock.ts";
 
 const START = Date.UTC(2026, 7, 25, 12, 0, 0);
 const BACKOFF_MS = 240_000;
@@ -209,6 +215,165 @@ describe("a Retry-After of zero is not a licence to retry at once", () => {
     const hold = holdForResponse(429, "30", 0, BACKOFF_MS);
     assert.ok(hold !== null);
     assert.equal(hold.holdMs, 30_000);
+  });
+});
+
+/**
+ * The back-pressure the governor earns FOR ITSELF, on the far side of the wait.
+ *
+ * Gate 5 is re-asked at the process boundary, because AC10 requires a robots
+ * decision older than `robots.cacheBoundMs` to be re-retrieved before the next
+ * fetch to that host. That re-ask can retrieve `/robots.txt`, and that
+ * retrieval is a request to the very host whose release the waiting request
+ * already holds. `HostScheduler.release` is the only reader of a hold, and it
+ * has returned by then.
+ *
+ * Nothing in AC14, AC12 or AC1 carves out an exception for a hold the governor
+ * earned by going to ask a host for its own rules, so gate 6 is taken again
+ * whenever that re-ask landed a retrieval. These cases hold that shut. They use
+ * the recording transport rather than the loopback server because what is under
+ * test is WHEN a request leaves, on a virtual clock, over holds measured in
+ * minutes.
+ */
+describe("a hold the robots re-ask earns past the wait binds the request behind it", () => {
+  const MIN_DELAY_MS = 5_000;
+  /** Short enough that a request queued behind another outlives it. */
+  const CACHE_BOUND_MS = 2_000;
+  const ALLOW_EVERYTHING = "User-agent: *\nAllow: /\n";
+
+  function probeConfig() {
+    return testConfig({
+      hosts: {
+        "127.0.0.1": {
+          maxRequests: 1_000,
+          intervalMs: 60_000,
+          minDelayMs: MIN_DELAY_MS,
+          jitterMs: 0,
+        },
+      },
+      robots: { cacheBoundMs: CACHE_BOUND_MS },
+      backPressure: { defaultBackoffMs: BACKOFF_MS },
+      breaker: { minimumOutcomes: 1_000_000, failureRateThreshold: 1, pauseMs: 1 },
+      sources: { "test-source": {} },
+    });
+  }
+
+  /**
+   * Offer two paths on one host at once. The second waits behind the first and
+   * outlives the robots cache bound while it waits, so the re-ask at the
+   * process boundary retrieves `/robots.txt` again - and `answerRobots` decides
+   * what the host says when it does.
+   */
+  async function offerTwo(
+    answerRobots: (served: number) => {
+      status: number;
+      headers?: Record<string, string>;
+      body: string;
+    },
+  ): Promise<SentRequest[]> {
+    const clock = new FakeClock(START);
+    let robotsServed = 0;
+    const transport = recordingTransport(clock, (request) => {
+      if (new URL(request.url).pathname !== "/robots.txt") {
+        return { status: 200, body: "a price would be here" };
+      }
+      robotsServed += 1;
+      return answerRobots(robotsServed);
+    });
+    const { governor } = buildGovernor({
+      transport,
+      config: probeConfig(),
+      clock,
+      random: sequenceRandom([0]),
+    });
+
+    const outcomes = await Promise.all(
+      ["/a", "/b"].map((path) =>
+        governor.request({ url: `http://127.0.0.1${path}`, sourceId: "test-source" }),
+      ),
+    );
+    assert.deepEqual(
+      outcomes.flatMap((outcome) => (outcome.ok ? [] : [outcome.reason])),
+      [],
+      "the probe is not set up: something refused these before the send",
+    );
+
+    const robots = transport.sent.filter(
+      (request) => new URL(request.url).pathname === "/robots.txt",
+    );
+    assert.ok(
+      robots.length >= 2 && robots[1].at !== robots[0].at,
+      "the probe is not set up: robots.txt was retrieved once, so the host " +
+        "never got the chance to answer the re-ask",
+    );
+    return transport.sent;
+  }
+
+  it("issues no request inside a back-off a 429 on that re-ask earned (AC14)", async () => {
+    const sent = await offerTwo((served) =>
+      served >= 2
+        ? { status: 429, body: "slow down" }
+        : { status: 200, body: ALLOW_EVERYTHING },
+    );
+
+    const stoppedAt = sent.filter(
+      (request) => new URL(request.url).pathname === "/robots.txt",
+    )[1].at;
+    const inside = productRequests(sent).filter(
+      (request) => request.at >= stoppedAt && request.at < stoppedAt + BACKOFF_MS,
+    );
+    assert.deepEqual(
+      inside.map((request) => `${new URL(request.url).pathname}@${request.at}`),
+      [],
+      `a request left 127.0.0.1 inside the ${BACKOFF_MS}ms back-off the host ` +
+        `earned at ${stoppedAt} by answering 429 to the governor's own robots fetch`,
+    );
+  });
+
+  it("respects a Retry-After that re-ask earned, in the delay-seconds form (AC12)", async () => {
+    const askedFor = 7_200_000;
+    const sent = await offerTwo((served) =>
+      served >= 2
+        ? { status: 429, headers: { "retry-after": "7200" }, body: "" }
+        : { status: 200, body: ALLOW_EVERYTHING },
+    );
+
+    const stoppedAt = sent.filter(
+      (request) => new URL(request.url).pathname === "/robots.txt",
+    )[1].at;
+    const inside = productRequests(sent).filter(
+      (request) => request.at >= stoppedAt && request.at < stoppedAt + askedFor,
+    );
+    assert.deepEqual(
+      inside.map((request) => `${new URL(request.url).pathname}@${request.at}`),
+      [],
+      `a request left 127.0.0.1 inside the ${askedFor}ms this host asked for ` +
+        `at ${stoppedAt}`,
+    );
+  });
+
+  it("keeps the configured minimum delay between that re-ask and the page (AC1, AC3)", async () => {
+    // No hold at all here: the host answers the re-ask normally. The page must
+    // STILL be spaced from it, because a robots retrieval is a request to this
+    // host like any other and the delay is measured over what actually leaves.
+    const sent = await offerTwo(() => ({ status: 200, body: ALLOW_EVERYTHING }));
+
+    const tooClose: string[] = [];
+    for (let index = 1; index < sent.length; index += 1) {
+      const gap = sent[index].at - sent[index - 1].at;
+      if (gap < MIN_DELAY_MS) {
+        tooClose.push(
+          `${new URL(sent[index - 1].url).pathname}@${sent[index - 1].at} -> ` +
+            `${new URL(sent[index].url).pathname}@${sent[index].at} (${gap}ms)`,
+        );
+      }
+    }
+    assert.deepEqual(
+      tooClose,
+      [],
+      `consecutive requests left 127.0.0.1 closer together than the configured ` +
+        `${MIN_DELAY_MS}ms`,
+    );
   });
 });
 
