@@ -41,4 +41,12 @@ export type RefusalReason =
   | "allowance-exhausted"
   | "robots-unreachable"
   | "robots-disallowed"
+  // The last two are refusals at the PROCESS BOUNDARY rather than verdicts
+  // about a host or a source. Each one says that the governor could not bring
+  // one of its own answers back to the present before this request left, and
+  // that it declined to leave under an answer it had already declared expired.
+  // Both run toward FEWER requests, which is the only direction this
+  // repository's fail-safe rule permits an uncertain answer to run.
+  | "robots-stale"
+  | "host-held"
   | "transport-error";

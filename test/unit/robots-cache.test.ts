@@ -20,7 +20,11 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { LIVE_TRANSPORT, ROBOTS_CACHE_BOUND_CEILING_MS } from "@deal-sentinel/governor";
+import {
+  LIVE_TRANSPORT,
+  MAX_BOUNDARY_WAITS,
+  ROBOTS_CACHE_BOUND_CEILING_MS,
+} from "@deal-sentinel/governor";
 
 import { startLoopbackServer } from "../support/loopback-server.ts";
 import type { LoopbackServer } from "../support/loopback-server.ts";
@@ -343,5 +347,272 @@ describe("the cache bound holds where the request WAITS, not only where it is as
       outcomes.map((outcome) => outcome.ok),
       [true, true, true, true, true],
     );
+  });
+});
+
+/**
+ * The same criterion past the SECOND wait, and past every wait after it.
+ *
+ * Re-asking robots at the process boundary can RETRIEVE `/robots.txt`, and that
+ * retrieval is a request to the host, so the host may answer it with a hold -
+ * which the governor must then wait out before this request may leave (AC12,
+ * AC14). That wait is a second wait, and a decision taken before it is a
+ * decision about a moment that has passed just as much as one taken before the
+ * first. Nothing may leave under it either.
+ *
+ * The cases below are the shapes that reach it: the numbers `config/governor.json`
+ * ships with one `Retry-After` seven hours out, and a bare 429 carrying no
+ * header at all. Both are graded on what LEFT the process, from the transport's
+ * own log, rather than on the gate's opinion of itself.
+ */
+const DISALLOW_B = "User-agent: *\nDisallow: /b\n";
+const ALLOW_ALL = "User-agent: *\nAllow: /\n";
+/** The committed loopback ceiling, read off `config/governor.json`. */
+const SHIPPED_HOST = { maxRequests: 240, intervalMs: 60_000, minDelayMs: 1, jitterMs: 1 };
+const SHIPPED_CACHE_BOUND_MS = 21_600_000;
+const SHIPPED_BACKOFF_MS = 900_000;
+const NO_BREAKER = {
+  windowMs: 6_000_000,
+  minimumOutcomes: 1_000_000,
+  failureRateThreshold: 1,
+  pauseMs: 1,
+};
+
+function boundaryConfig(overrides: {
+  cacheBoundMs?: number;
+  minDelayMs?: number;
+  jitterMs?: number;
+  defaultBackoffMs?: number;
+}) {
+  return testConfig({
+    hosts: {
+      "127.0.0.1": {
+        ...SHIPPED_HOST,
+        minDelayMs: overrides.minDelayMs ?? SHIPPED_HOST.minDelayMs,
+        jitterMs: overrides.jitterMs ?? SHIPPED_HOST.jitterMs,
+      },
+    },
+    robots: { cacheBoundMs: overrides.cacheBoundMs ?? SHIPPED_CACHE_BOUND_MS },
+    backPressure: { defaultBackoffMs: overrides.defaultBackoffMs ?? SHIPPED_BACKOFF_MS },
+    breaker: NO_BREAKER,
+    sources: { "test-source": {} },
+  });
+}
+
+/** Every product request that left, paired with the age of its decision. */
+function agesAtTheWire(sent: readonly SentRequest[]): Array<[string, number]> {
+  const retrievals = robotsRetrievals(sent);
+  return productRequests(sent).map((request) => {
+    const current = retrievals.filter((retrieval) => retrieval.at <= request.at).pop();
+    assert.ok(current !== undefined, `${request.url} left before any robots retrieval`);
+    return [`${new URL(request.url).pathname}@${request.at}`, request.at - current.at];
+  });
+}
+
+describe("the bound holds past the wait the robots re-ask itself earns", () => {
+  it("refuses rather than fetch under a decision a hold outlived (shipped numbers)", async () => {
+    // The host holds the first page seven hours; the re-ask at the end of that
+    // hold is answered 429 asking for seven more; and from its third answer
+    // onward the host disallows /b. Seven hours is longer than the six-hour
+    // bound `config/governor.json` ships, so the decision the second wait would
+    // have delivered /b under is one the governor has already declared expired.
+    const clock = new FakeClock();
+    let robotsServed = 0;
+    let pagesServed = 0;
+    const sevenHoursMs = 7 * 3_600_000;
+    const transport = recordingTransport(clock, (request) => {
+      if (new URL(request.url).pathname === "/robots.txt") {
+        robotsServed += 1;
+        if (robotsServed === 1) return { status: 200, body: ALLOW_ALL };
+        if (robotsServed === 2) {
+          return {
+            status: 429,
+            headers: { "retry-after": String(sevenHoursMs / 1000) },
+            body: "",
+          };
+        }
+        return { status: 200, body: DISALLOW_B };
+      }
+      pagesServed += 1;
+      if (pagesServed === 1) {
+        return {
+          status: 503,
+          headers: { "retry-after": String(sevenHoursMs / 1000) },
+          body: "",
+        };
+      }
+      return { status: 200, body: "a price would be here" };
+    });
+    const { governor } = buildGovernor({
+      transport,
+      config: boundaryConfig({}),
+      clock,
+      random: sequenceRandom([0]),
+    });
+
+    const outcomes = await Promise.all(
+      ["/a", "/b"].map((path) =>
+        governor.request({ url: `http://127.0.0.1${path}`, sourceId: "test-source" }),
+      ),
+    );
+
+    for (const [where, age] of agesAtTheWire(transport.sent)) {
+      assert.ok(
+        age <= SHIPPED_CACHE_BOUND_MS,
+        `${where} left under a robots decision ${age}ms old, past the ` +
+          `configured bound of ${SHIPPED_CACHE_BOUND_MS}ms`,
+      );
+    }
+
+    // And the point of asking again: the rule the host added while it was
+    // holding us off is OBEYED, rather than discovered after the request it
+    // would have prevented had already gone.
+    assert.equal(
+      robotsRetrievals(transport.sent).length,
+      3,
+      "the governor did not ask this host for its rules again on the far side " +
+        "of the hold its own robots re-ask earned",
+    );
+    assert.equal(outcomes[0].ok, true, "the unheld request should still have left");
+    assert.equal(outcomes[1].ok, false, "/b left under a decision the host had replaced");
+    assert.equal(
+      outcomes[1].ok === false ? outcomes[1].reason : "",
+      "robots-disallowed",
+    );
+    assert.equal(
+      productRequests(transport.sent).some(
+        (request) => new URL(request.url).pathname === "/b",
+      ),
+      false,
+      "/b reached the wire even though the host's current robots.txt disallows it",
+    );
+  });
+
+  it("reaches the same shape on a bare 429 with no Retry-After anywhere", async () => {
+    // Nothing exotic: every hold below is `backPressure.defaultBackoffMs`, and
+    // the only value moved is the cache bound, set to ten minutes - far inside
+    // RFC 9309 2.4's twenty-four hours and in the direction the committed file's
+    // own comment recommends. Any configuration whose back-off outlasts its
+    // cache bound reaches this on a 429 carrying no header at all.
+    const shortBoundMs = 600_000;
+    const clock = new FakeClock();
+    let robotsServed = 0;
+    let pagesServed = 0;
+    const transport = recordingTransport(clock, (request) => {
+      if (new URL(request.url).pathname === "/robots.txt") {
+        robotsServed += 1;
+        if (robotsServed === 1) return { status: 200, body: ALLOW_ALL };
+        if (robotsServed === 2) return { status: 429, body: "slow down" };
+        return { status: 200, body: DISALLOW_B };
+      }
+      pagesServed += 1;
+      if (pagesServed === 1) return { status: 429, body: "slow down" };
+      return { status: 200, body: "a price would be here" };
+    });
+    const { governor } = buildGovernor({
+      transport,
+      config: boundaryConfig({ cacheBoundMs: shortBoundMs }),
+      clock,
+      random: sequenceRandom([0]),
+    });
+
+    await Promise.all(
+      ["/a", "/b"].map((path) =>
+        governor.request({ url: `http://127.0.0.1${path}`, sourceId: "test-source" }),
+      ),
+    );
+
+    for (const [where, age] of agesAtTheWire(transport.sent)) {
+      assert.ok(
+        age <= shortBoundMs,
+        `${where} left under a robots decision ${age}ms old, past the ` +
+          `configured bound of ${shortBoundMs}ms, with no Retry-After involved`,
+      );
+    }
+  });
+
+  it("settles rather than loops when a host holds longer than the bound forever", async () => {
+    // The termination case. Every `/robots.txt` is answered 429 asking for
+    // twenty minutes against a ten-minute bound, so no instant exists at which
+    // a fresh decision and this host's back-pressure are both satisfied.
+    // Alternating the two gates until one did would be an unbounded stream of
+    // `/robots.txt` to a host that has asked for less traffic, and a promise
+    // that never settles. The boundary stops after MAX_BOUNDARY_WAITS and
+    // refuses, which is the direction ruling R4 fixes for this repository.
+    const clock = new FakeClock();
+    const transport = recordingTransport(clock, (request) =>
+      new URL(request.url).pathname === "/robots.txt"
+        ? { status: 429, headers: { "retry-after": "1200" }, body: "" }
+        : { status: 200, body: "a price would be here" },
+    );
+    const { governor } = buildGovernor({
+      transport,
+      config: boundaryConfig({ cacheBoundMs: 600_000 }),
+      clock,
+      random: sequenceRandom([0]),
+    });
+
+    const outcome = await governor.request({
+      url: "http://127.0.0.1/a",
+      sourceId: "test-source",
+    });
+
+    assert.equal(outcome.ok, false, "a request left under a decision that never went fresh");
+    assert.ok(
+      outcome.ok === false && ["robots-stale", "host-held"].includes(outcome.reason),
+      `the boundary refused with ${outcome.ok === false ? outcome.reason : "ok"}, ` +
+        "which does not name the condition that refused it",
+    );
+    assert.equal(
+      productRequests(transport.sent).length,
+      0,
+      "a page left this host anyway",
+    );
+    assert.ok(
+      robotsRetrievals(transport.sent).length <= 1 + MAX_BOUNDARY_WAITS,
+      `the boundary retrieved /robots.txt ${robotsRetrievals(transport.sent).length} ` +
+        `times for one request, past the ${MAX_BOUNDARY_WAITS} waits it is allowed`,
+    );
+  });
+
+  it("asks once and stops where the configured delay outlives the bound", async () => {
+    // The one exception, and it is checked rather than assumed. This host is
+    // configured to be given a request no more often than every five seconds
+    // while its robots decision expires after two, so the retrieval and the
+    // fetch behind it are spaced further apart than the answer may live and NO
+    // number of rounds can end fresh. The boundary re-asks once - the freshest
+    // answer that exists here - and then stops, rather than fetching
+    // `/robots.txt` forever against a host that answers every time.
+    //
+    // `validateGovernorConfig` REFUSES this configuration (see
+    // governor-config.test.ts), so it can only be built by hand, as here.
+    const clock = new FakeClock();
+    let robotsServed = 0;
+    const transport = recordingTransport(clock, (request) => {
+      if (new URL(request.url).pathname !== "/robots.txt") {
+        return { status: 200, body: "a price would be here" };
+      }
+      robotsServed += 1;
+      return { status: 200, body: ALLOW_ALL };
+    });
+    const { governor } = buildGovernor({
+      transport,
+      config: boundaryConfig({ cacheBoundMs: 2_000, minDelayMs: 5_000, jitterMs: 1 }),
+      clock,
+      random: sequenceRandom([0]),
+    });
+
+    const outcome = await governor.request({
+      url: "http://127.0.0.1/a",
+      sourceId: "test-source",
+    });
+
+    assert.equal(outcome.ok, true, "the request was refused by a configuration, not by a host");
+    assert.equal(
+      robotsRetrievals(transport.sent).length,
+      2,
+      "the boundary kept asking a host for rules it can never use in time",
+    );
+    assert.equal(productRequests(transport.sent).length, 1);
   });
 });

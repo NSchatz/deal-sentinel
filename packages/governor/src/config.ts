@@ -168,7 +168,46 @@ export function validateGovernorConfig(
     "sources",
   ]);
 
+  assertRobotsDecisionsCanOutliveTheDelay(config, origin);
+
   return config;
+}
+
+/**
+ * A CROSS-FIELD rule: two values that are each legal alone can still describe a
+ * governor that can never fetch anything under a robots decision it still
+ * believes.
+ *
+ * `robots.cacheBoundMs` is this system's own statement of how long a decision
+ * about a host stays true. `hosts[...].minDelayMs` is the floor on the gap
+ * between two consecutive requests to that host - and the governor's own
+ * `/robots.txt` retrieval is one of those requests, because the file that says
+ * how polite to be is fetched politely. So the fetch behind a retrieval is
+ * spaced from it by at least `minDelayMs`, and where that spacing is already as
+ * long as the bound, EVERY fetch to that host leaves under a decision this
+ * system has already declared expired. There is no ordering of the gates that
+ * rescues it; the numbers are simply the wrong way round.
+ *
+ * Refused at load, naming both keys, rather than discovered as a governor that
+ * quietly fetches under expired rules.
+ */
+function assertRobotsDecisionsCanOutliveTheDelay(
+  config: GovernorConfig,
+  origin: string,
+): void {
+  for (const [name, ceiling] of Object.entries(config.hosts)) {
+    if (ceiling.minDelayMs < config.robots.cacheBoundMs) continue;
+    throw new GovernorConfigError(
+      `${origin}: hosts["${name}"].minDelayMs is ${ceiling.minDelayMs}, which is ` +
+        `not less than robots.cacheBoundMs (${config.robots.cacheBoundMs}). The ` +
+        "governor fetches a host's robots.txt through that same minimum delay, " +
+        "so every request to this host would leave at least " +
+        `${ceiling.minDelayMs}ms after the decision permitting it, and that ` +
+        "decision expires after " +
+        `${config.robots.cacheBoundMs}ms. Raise robots.cacheBoundMs (up to ` +
+        `${ROBOTS_CACHE_BOUND_CEILING_MS}) or lower this host's minDelayMs.`,
+    );
+  }
 }
 
 function readHttp(

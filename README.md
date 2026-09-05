@@ -62,7 +62,12 @@ place, and it is where every rule lives:
   or a connection failure means the file is undefined and the host is COMPLETELY
   DISALLOWED (2.3.1.4). Decisions are cached, bounded by configuration that may
   not exceed 24 hours (2.4), and the file is parsed up to a limit that may not
-  be configured below 500 KiB (2.5).
+  be configured below 500 KiB (2.5). That bound is enforced where the request
+  LEAVES, not where it was admitted: a request that waited out a ceiling, a
+  delay or a `Retry-After` hold has its decision re-asked on the far side of
+  every wait, and where no instant can satisfy both a fresh decision and the
+  host's own back-pressure the request is REFUSED rather than sent under rules
+  this system has declared expired.
 - **Back-pressure, both legal forms.** `Retry-After: 120` and
   `Retry-After: Fri, 31 Dec 1999 23:59:59 GMT` are both read (RFC 9110 10.2.3).
   A 429 with no header, a value that will not parse, or one naming an instant

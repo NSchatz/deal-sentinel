@@ -100,6 +100,32 @@ export class RobotsGate {
     return this.#landed.get(origin) ?? 0;
   }
 
+  /**
+   * When this origin's cached decision was taken, or null when none is held.
+   *
+   * A `refused` retrieval caches nothing, so this answers about verdicts only -
+   * which is the question the cache bound is about.
+   */
+  decidedAt(origin: string): number | null {
+    return this.#cache.get(origin)?.fetchedAt ?? null;
+  }
+
+  /**
+   * Is this origin's cached decision still inside `robots.cacheBoundMs` at the
+   * instant `at`?
+   *
+   * The governor asks this on the far side of every wait it takes, because the
+   * answer `decide` gave is a statement about the moment it was given and
+   * `cacheBoundMs` is this system's own statement of how long such an answer
+   * stays true (RFC 9309 2.4). It is the SAME predicate `#entryFor` uses to
+   * decide whether to re-retrieve, spelled once, so the two can never disagree
+   * about what "expired" means.
+   */
+  decidedWithinBoundAt(origin: string, at: number): boolean {
+    const fetchedAt = this.decidedAt(origin);
+    return fetchedAt !== null && at - fetchedAt < this.#config.robots.cacheBoundMs;
+  }
+
   async decide(url: URL, sourceId: string): Promise<RobotsDecision> {
     const origin = url.origin;
     const entry = await this.#entryFor(origin, sourceId);
@@ -163,10 +189,7 @@ export class RobotsGate {
 
   async #entryFor(origin: string, sourceId: string): Promise<CacheEntry> {
     const cached = this.#cache.get(origin);
-    if (
-      cached !== undefined &&
-      this.#clock.now() - cached.fetchedAt < this.#config.robots.cacheBoundMs
-    ) {
+    if (cached !== undefined && this.decidedWithinBoundAt(origin, this.#clock.now())) {
       return cached;
     }
 

@@ -258,6 +258,61 @@ describe("two bounds a standard fixes, which configuration may not cross", () =>
   });
 });
 
+/**
+ * A relationship between two values rather than a bound on either, and it is
+ * enforced for the same reason every other refusal here is: a governor that
+ * cannot obey its own rules must say so at start rather than discover it at the
+ * wire.
+ *
+ * The governor fetches a host's `robots.txt` through that host's own minimum
+ * delay - the file that says how polite to be is fetched politely - so the page
+ * behind a retrieval leaves at least `minDelayMs` after the decision that
+ * permitted it. Where `minDelayMs` is already at least `robots.cacheBoundMs`,
+ * EVERY fetch to that host would leave under a decision this system has already
+ * declared expired, and no ordering of the gates rescues it.
+ */
+describe("a delay that outlives the robots decision it waits under is refused", () => {
+  it("refuses a host whose minDelayMs is not less than robots.cacheBoundMs", () => {
+    const error = refusal((document) => {
+      (document.robots as Record<string, unknown>).cacheBoundMs = 2_000;
+      (
+        (document.hosts as Record<string, Record<string, unknown>>)["127.0.0.1"]
+      ).minDelayMs = 5_000;
+    });
+    assert.match(error.message, /hosts\["127\.0\.0\.1"\]\.minDelayMs is 5000/);
+    assert.match(error.message, /robots\.cacheBoundMs \(2000\)/);
+  });
+
+  it("refuses the two being exactly equal, because equal is already too long", () => {
+    const error = refusal((document) => {
+      (document.robots as Record<string, unknown>).cacheBoundMs = 5_000;
+      (
+        (document.hosts as Record<string, Record<string, unknown>>)["127.0.0.1"]
+      ).minDelayMs = 5_000;
+    });
+    assert.match(error.message, /not less than robots\.cacheBoundMs/);
+  });
+
+  it("accepts a delay one millisecond inside the bound", () => {
+    const document = completeDocument();
+    (document.robots as Record<string, unknown>).cacheBoundMs = 5_000;
+    ((document.hosts as Record<string, Record<string, unknown>>)["127.0.0.1"]).minDelayMs =
+      4_999;
+    const config = validateGovernorConfig(document, "the test configuration");
+    assert.equal(config.hosts["127.0.0.1"].minDelayMs, 4_999);
+  });
+
+  it("holds on the committed file, whose delay is one millisecond", () => {
+    const config = loadGovernorConfig(COMMITTED_CONFIG);
+    for (const [name, ceiling] of Object.entries(config.hosts)) {
+      assert.ok(
+        ceiling.minDelayMs < config.robots.cacheBoundMs,
+        `hosts["${name}"] would fetch under an expired robots decision`,
+      );
+    }
+  });
+});
+
 describe("the committed default configuration", () => {
   it("loads, so the file this repository ships is not the one that refuses", () => {
     const config = loadGovernorConfig(COMMITTED_CONFIG);

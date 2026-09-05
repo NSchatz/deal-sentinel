@@ -12,7 +12,7 @@
  * the suite if it tries.
  */
 
-export { Governor } from "./governor.ts";
+export { Governor, MAX_BOUNDARY_WAITS } from "./governor.ts";
 export type {
   GovernedRequest,
   GovernedResponse,

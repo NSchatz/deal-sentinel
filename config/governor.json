@@ -48,6 +48,11 @@
       "NOT use a cached robots.txt for more than 24 hours. Six hours is chosen",
       "below the ceiling so a host that ADDS a disallow rule is obeyed sooner;",
       "one extra robots request per host per six hours is not a politeness cost.",
+      "cacheBoundMs must also be GREATER than every host's minDelayMs, and the",
+      "loader refuses the file when it is not: robots.txt is fetched through",
+      "that same delay, so a page always leaves at least minDelayMs after the",
+      "decision permitting it, and a delay at least as long as the bound would",
+      "mean every fetch left under a decision this system calls expired.",
       "parsingLimitBytes may not fall below 512000: RFC 9309 2.5 says the",
       "parsing limit MUST be at least 500 kibibytes."
     ],
