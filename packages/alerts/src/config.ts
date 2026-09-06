@@ -308,6 +308,17 @@ function readChannel(
  * The KEY is required and its value may be null: "absent" and "the owner has
  * not chosen a channel yet" must not be the same document, or a truncated file
  * reads as a deliberate decision to stay quiet.
+ *
+ * WHAT THIS DOES NOT JUDGE: whether the URL is itself a secret. A webhook URL
+ * is a bearer credential wearing a URL's clothes and the cited channel documents
+ * an `?auth=` parameter of its own, so an endpoint that carries a credential is
+ * an ordinary configuration here and `redaction.ts` is what keeps it out of
+ * every string this package reports. The one shape that is not merely redacted
+ * is a credential in the URL's USERINFO, `https://user:password@host/topic`:
+ * `channel.ts` refuses to send to one, because a credential inside the URL is
+ * quoted back by everything the URL passes through. It is refused there rather
+ * than here so that the refusal names the channel by origin and never has to
+ * decide whether to echo the endpoint.
  */
 function readEndpoint(node: Record<string, unknown>, origin: string): string | null {
   if (!("endpoint" in node)) {

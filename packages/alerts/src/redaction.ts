@@ -12,13 +12,30 @@
  * package as text to report.
  *
  * So every string this package reports or stores goes through `scrub` first,
- * and the scrub is TWO RULES that back each other up, the same shape
+ * and the scrub is THREE RULES that back each other up, the same shape
  * `packages/sources/src/credential.ts` uses for the vendor key:
  *
  *   1. THE SECRET ITSELF, wherever it appears and however it got there;
  *   2. THE QUERY STRING of a credential-bearing parameter, whatever its value -
  *      which still works when the credential in hand is not the one that
- *      produced the text.
+ *      produced the text;
+ *   3. THE USERINFO of any URL in the text - `scheme://user:password@host` -
+ *      whatever the user and password are. A URL carries a credential in three
+ *      places and rules 1 and 2 reach only two of them: userinfo is not the
+ *      secret this redactor was handed (a channel credential travels in a
+ *      header) and it is not a query parameter, so without this rule an
+ *      operator's basic-auth endpoint quoted back inside a governor refusal or
+ *      a transport error walks straight into a reported failure detail.
+ *
+ * WHAT THIS GUARANTEES, said exactly. `scrub` removes the credential it holds,
+ * the value of a credential-bearing query parameter, and the userinfo of a URL.
+ * It does NOT claim that a URL is safe to print once scrubbed - a path can be a
+ * topic and a topic "is essentially a password" on the channel this repository's
+ * roadmap cites - which is why a failure report names the channel with
+ * `channelOrigin` and never with its endpoint, and why the notification path
+ * REFUSES a credential-bearing listing link rather than scrubbing one into the
+ * owner's alert. Scrubbing is the backstop for text somebody else composed;
+ * refusing is what this package does with text of its own.
  *
  * Deliberately NOT imported from `packages/sources`. That package sits above
  * this one in the dependency order (it depends on the db and the governor and
@@ -56,6 +73,18 @@ export type Redactor = {
   scrub(text: string): string;
 };
 
+/**
+ * The userinfo component of a URL: everything between `scheme://` and the `@`
+ * that ends it. Matched in ARBITRARY TEXT rather than on a parsed `URL`, because
+ * what arrives at `scrub` is a sentence with a URL quoted inside it - a governor
+ * refusal detail, or a transport error whose message quotes the whole href.
+ *
+ * The character class stops at anything that cannot appear in userinfo (RFC 3986
+ * section 3.2.1), so a `@` in a path or a query - `.../p?to=a@b.example` - is not
+ * mistaken for one: the class cannot cross the `/` or `?` that precedes it.
+ */
+const URL_USERINFO_PATTERN = /([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)([^\s/?#@]+)@/g;
+
 /** Replace the value of every credential-bearing query parameter. */
 export function redactCredentialParameters(text: string): string {
   return text.replace(
@@ -64,9 +93,29 @@ export function redactCredentialParameters(text: string): string {
   );
 }
 
+/** Replace the userinfo of every URL in the text, user name and password both. */
+export function redactUrlUserinfo(text: string): string {
+  return text.replace(
+    URL_USERINFO_PATTERN,
+    (_match, scheme: string) => `${scheme}${CREDENTIAL_PLACEHOLDER}@`,
+  );
+}
+
+/**
+ * Both URL rules at once: userinfo, then credential-bearing query values.
+ *
+ * This is what "credential-bearing URL" MEANS in this package, and it is applied
+ * in exactly two places: inside `scrub`, and as the test by which `usableLink`
+ * refuses a listing link. One definition, so the scrub and the refusal cannot
+ * drift apart.
+ */
+export function redactUrlCredentials(text: string): string {
+  return redactCredentialParameters(redactUrlUserinfo(text));
+}
+
 /**
  * A redactor for the alert channel: the credential it was given, if any, plus
- * the parameter rule above. Holding the secret is what makes rule 1 possible;
+ * the two URL rules above. Holding the secret is what makes rule 1 possible;
  * the object exposes no way to read it back, so passing a redactor around is
  * not passing the credential around.
  */
@@ -74,12 +123,12 @@ export function channelRedactor(secret: string | null): Redactor {
   const trimmed = secret === null ? "" : secret.trim();
   return {
     scrub(text) {
-      const withoutParameters = redactCredentialParameters(text);
-      if (trimmed.length === 0) return withoutParameters;
+      const withoutUrlCredentials = redactUrlCredentials(text);
+      if (trimmed.length === 0) return withoutUrlCredentials;
       // `split`/`join` rather than a regular expression: a credential is
       // arbitrary text and may contain regex metacharacters, and an escaping
       // helper that got one case wrong would fail open.
-      return withoutParameters.split(trimmed).join(CREDENTIAL_PLACEHOLDER);
+      return withoutUrlCredentials.split(trimmed).join(CREDENTIAL_PLACEHOLDER);
     },
   };
 }
@@ -89,9 +138,10 @@ export function channelRedactor(secret: string | null): Redactor {
  * port, and nothing else.
  *
  * An operator has to know WHICH channel refused them, and the whole URL is the
- * one string that must not be the answer - the path is a topic (which the cited
- * channel's own documentation says "is essentially a password") and the query
- * may be the credential. The origin identifies the server and carries neither.
+ * one string that must not be the answer - the userinfo is a credential outright,
+ * the path is a topic (which the cited channel's own documentation says "is
+ * essentially a password") and the query may be the credential too. The origin
+ * identifies the server and carries none of the three.
  */
 export function channelOrigin(endpoint: string): string {
   try {

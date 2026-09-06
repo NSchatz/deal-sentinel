@@ -42,6 +42,8 @@ export {
   channelOrigin,
   channelRedactor,
   redactCredentialParameters,
+  redactUrlCredentials,
+  redactUrlUserinfo,
 } from "./redaction.ts";
 export type { Redactor } from "./redaction.ts";
 

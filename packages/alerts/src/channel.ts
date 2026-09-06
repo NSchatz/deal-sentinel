@@ -32,11 +32,19 @@
  *   4. THE REMAINING NOTIFICATIONS ARE STILL ATTEMPTED after an ordinary
  *      failure. One listing's delivery failing says nothing about the next.
  *
- * AND ONE RULE ABOUT SECRETS. The credential is read once, put in a header, and
+ * AND TWO RULES ABOUT SECRETS. The credential is read once, put in a header, and
  * never anywhere else: not in the body, not in a report, not in a stored row.
  * Every string this module hands back has been through the redactor, because
  * the governor quotes the request URL inside its own refusal details and the
- * endpoint may be a credential in itself.
+ * endpoint may be a credential in itself. And a credential written into the
+ * ENDPOINT'S USERINFO - `https://user:password@host/topic` - is not sent at all:
+ * a credential belongs in a header, where this module can keep it out of every
+ * string it reports, and a credential inside the URL is one the governor, the
+ * transport and every error either of them raises would quote back verbatim.
+ * The redactor catches those quotes; refusing to send is what stops them being
+ * made. A credential-bearing QUERY parameter is a different matter and is
+ * accepted, because a webhook URL is a bearer credential wearing a URL's clothes
+ * and refusing one would refuse the channels this system exists to reach.
  */
 
 import type { Governor } from "@deal-sentinel/governor";
@@ -52,7 +60,9 @@ export type DeliveryOutcome =
   | {
       delivered: false;
       /**
-       * `unconfigured` - no endpoint is configured, so nothing was attempted;
+       * `unconfigured` - no usable endpoint is configured, so nothing was
+       *                  attempted: none at all, or one carrying a credential
+       *                  in its userinfo, which this module will not send;
        * `refused`      - the channel rejected the credential (rule 3);
        * `failed`       - anything else: a governor refusal, a transport error,
        *                  a timeout, an error status.
@@ -132,11 +142,35 @@ export function governedChannel(parts: GovernedChannelParts): AlertChannel {
   const redactor: Redactor = channelRedactor(credential);
   const describedAs =
     config.endpoint === null ? "no channel configured" : channelOrigin(config.endpoint);
+  // Decided once: the endpoint does not change between notifications, and a
+  // refusal that costs a governor request to discover is a refusal that spends
+  // the household's allowance on a configuration error.
+  const endpointCarriesUserinfo =
+    config.endpoint !== null && carriesUserinfo(config.endpoint);
 
   return {
     describedAs,
 
     async deliver(notification): Promise<DeliveryOutcome> {
+      if (endpointCarriesUserinfo) {
+        // Nothing is attempted, so nothing leaves, nothing is suppressed, and
+        // no string carrying the credential is composed by anyone. The endpoint
+        // is NOT quoted here: naming the channel by origin is the whole point.
+        return {
+          delivered: false,
+          kind: "unconfigured",
+          detail:
+            `${describedAs} was not asked for ${notification.ruleId} on ` +
+            `${notification.sourceId}/${notification.listingId}: ` +
+            "channel.endpoint in config/alerts.json carries a credential in " +
+            "its userinfo, the user:password@ before the host, and a " +
+            "credential inside a URL is quoted back by every error that URL " +
+            "appears in. Move it to channel.credential, which puts it in a " +
+            "header and keeps it out of every reported string.",
+          stopChannel: false,
+        };
+      }
+
       if (config.endpoint === null) {
         // The fail-closed default this repository ships. Nothing is attempted,
         // so nothing leaves and nothing is suppressed by a cooldown either.
@@ -221,4 +255,24 @@ export function governedChannel(parts: GovernedChannelParts): AlertChannel {
       return { delivered: true, status };
     },
   };
+}
+
+/**
+ * Does this endpoint keep a credential in its userinfo component?
+ *
+ * Asked on the PARSED URL rather than through the redactor, and deliberately:
+ * the redactor's URL rules also cover a credential-bearing query parameter, and
+ * an endpoint carrying one of those is a webhook URL, which this system accepts
+ * and never prints. Userinfo is the case that is refused, so it is the case this
+ * predicate names.
+ */
+function carriesUserinfo(endpoint: string): boolean {
+  try {
+    const url = new URL(endpoint);
+    return url.username.length > 0 || url.password.length > 0;
+  } catch {
+    // Unreachable through the loader, which refuses an endpoint that does not
+    // parse. A string that is not a URL carries no userinfo either.
+    return false;
+  }
 }

@@ -31,7 +31,11 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { governedChannel, runAlertEvaluation } from "@deal-sentinel/alerts";
+import {
+  channelRedactor,
+  governedChannel,
+  runAlertEvaluation,
+} from "@deal-sentinel/alerts";
 import type { AlertConfig, AlertNotification } from "@deal-sentinel/alerts";
 import {
   memoryAlertCooldowns,
@@ -568,6 +572,65 @@ describe("A14: no credential reaches a body, a stored record or a report", () =>
       "the governor's refusal carried the endpoint's credential into a report",
     );
     assert.match(outcome.detail, /auth=\[redacted\]/);
+  });
+
+  it("refuses to send to an endpoint carrying a credential in its userinfo", async () => {
+    // The third place a URL keeps a credential, and the one that is not merely
+    // scrubbed: a credential inside the URL is quoted back by the governor, by
+    // the transport and by every error either of them raises, so it is not sent
+    // at all. The host HAS a ceiling here, so nothing but the userinfo can be
+    // what refuses this.
+    answerWith = 200;
+    published.length = 0;
+
+    const endpoint = new URL(`${server.origin}/deals`);
+    endpoint.username = "alerts";
+    endpoint.password = SECRET;
+    const config = testAlertConfig({ channel: { endpoint: endpoint.href } });
+    const { governor } = buildGovernor({
+      transport: LIVE_TRANSPORT,
+      clock: new FakeClock(NOW.getTime()),
+      config: governorConfig(),
+    });
+    const channel = governedChannel({
+      governor,
+      config: config.channel,
+      sourceId: config.sourceId,
+      credential: null,
+    });
+
+    const outcome = await channel.deliver(notification());
+
+    assert.equal(outcome.delivered, false);
+    if (outcome.delivered) return;
+    assert.equal(outcome.kind, "unconfigured");
+    assert.equal(outcome.stopChannel, false);
+    assert.equal(published.length, 0, "a credential-bearing URL was sent");
+    assert.equal(
+      outcome.detail.includes(SECRET),
+      false,
+      "the endpoint's userinfo credential reached a reported failure detail",
+    );
+    assert.doesNotMatch(outcome.detail, /alerts:/);
+    assert.equal(channel.describedAs, server.origin);
+  });
+
+  it("scrubs a userinfo credential out of any URL it is asked to report", () => {
+    // The backstop for text this package did not compose: a governor refusal or
+    // a transport error quotes the whole href, and userinfo is a credential
+    // whether or not it is the one this redactor was handed.
+    const scrubbed = channelRedactor(null).scrub(
+      `the request to https://alerts:${SECRET}@notify.example.invalid/deals is refused`,
+    );
+
+    assert.equal(scrubbed.includes(SECRET), false);
+    assert.match(scrubbed, /https:\/\/\[redacted\]@notify\.example\.invalid\/deals/);
+  });
+
+  it("leaves an @ that is not userinfo alone", () => {
+    const text = "https://retailer.example.invalid/p/8880044?notify=owner@example.invalid";
+
+    assert.equal(channelRedactor(null).scrub(text), text);
   });
 
   it("stores no credential and no URL in the cooldown record", async () => {

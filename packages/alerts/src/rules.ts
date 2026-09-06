@@ -10,10 +10,14 @@
  * discovers by living with it.
  *
  * The window is derived from the OBSERVATION'S OWN INSTANT and not from now:
- * `(observedAt - windowMs, observedAt]`. That is the only choice that keeps the
- * function pure, and it is also the right reading of "a 90-day low" - the
- * question is whether this price beats the last ninety days as of when it was
- * seen, which is a fact that stays true after the fact.
+ * `(observedAt - windowMs, observedAt)`, OPEN AT BOTH ENDS. That is the only
+ * choice that keeps the function pure, and it is also the right reading of "a
+ * 90-day low" - the question is whether this price beats the last ninety days as
+ * of when it was seen, which is a fact that stays true after the fact. The upper
+ * end is open because the observation is not a reference for itself: closing it
+ * would mean a listing holding one stored row "holds one observation in the
+ * window", which is exactly the weakening the minimum-count assertion exists to
+ * prevent.
  *
  * EVERY NUMBER IS A `bigint` MINOR UNIT. Nothing here divides, no percentage is
  * computed, no `Number` touches a price. The improvement margin is configured

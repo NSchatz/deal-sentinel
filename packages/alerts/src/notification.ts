@@ -29,7 +29,7 @@ import { formatMinorUnits } from "@deal-sentinel/extractor";
 
 import { clearanceTagFor } from "./clearance.ts";
 import type { ClearanceTag } from "./clearance.ts";
-import { redactCredentialParameters } from "./redaction.ts";
+import { redactUrlCredentials } from "./redaction.ts";
 import type { RuleVerdict } from "./rules.ts";
 
 /** The listing an alert is about, as the evaluation run knows it. */
@@ -96,9 +96,10 @@ export function composeNotification(
         "and no notification was sent: that watchlist entry carries no link " +
         "the owner can open, or the link it carries is not an absolute http " +
         "or https URL, is longer than " +
-        `${MAX_LINK_CHARS} characters, or carries a credential in its query ` +
-        "string. Nothing is invented in its place. Add the listing's own page " +
-        "URL to the watchlist entry and the next run will alert on it.",
+        `${MAX_LINK_CHARS} characters, or carries a credential - in its query ` +
+        "string or in its userinfo. Nothing is invented in its place. Add the " +
+        "listing's own page URL to the watchlist entry and the next run will " +
+        "alert on it.",
     };
   }
 
@@ -163,10 +164,13 @@ export function composeNotification(
  *   - not an absolute http or https URL. A relative path opens nothing, and a
  *     `javascript:` or `data:` link is not a listing;
  *   - longer than the bound. A notification is a phone screen;
- *   - carrying a credential-bearing query parameter. That is the vendor API
- *     URL pasted into the wrong field, and a notification is the one place it
- *     must never reach - a phone, a push service and a notification history are
- *     three copies nobody can recall.
+ *   - carrying a credential, in EITHER of the two places a URL keeps one: a
+ *     credential-bearing query parameter (the vendor API URL pasted into the
+ *     wrong field) or the userinfo component, `https://user:password@host/path`.
+ *     A notification is the one place either must never reach - a phone, a push
+ *     service and a notification history are three copies nobody can recall -
+ *     and scrubbing is not the answer here: a link the owner is meant to TAP has
+ *     to be the real one, so a link that cannot be sent whole is not sent.
  */
 function usableLink(raw: string | null): string | null {
   if (raw === null) return null;
@@ -182,8 +186,10 @@ function usableLink(raw: string | null): string | null {
   if (url.protocol !== "http:" && url.protocol !== "https:") return null;
   // The redactor is the AUTHORITY on what counts as credential-bearing, so the
   // check and the scrub cannot drift apart: if scrubbing changes the URL, the
-  // URL carries something that must not be sent.
-  if (redactCredentialParameters(url.href) !== url.href) return null;
+  // URL carries something that must not be sent. `redactUrlCredentials` covers
+  // both places a URL keeps a credential, so a userinfo link is refused here on
+  // the same authority a `?token=` one is.
+  if (redactUrlCredentials(url.href) !== url.href) return null;
 
   return url.href;
 }

@@ -19,6 +19,11 @@
  * ending and whose rule did NOT fire produces no notification at all, and once
  * against the shape of the code - `composeNotification` takes a verdict that
  * fired, so there is no path from an ending to a notification to begin with.
+ *
+ * A9's refusal table is also where A14's "in its body" half is held down for the
+ * listing link: a link carrying a credential, in its query string or in its
+ * userinfo, is refused rather than printed into an alert. A14's own graded route
+ * is `alert-channel.test.ts`.
  */
 
 import assert from "node:assert/strict";
@@ -239,6 +244,14 @@ describe("A9: no link the owner can open means no alert", () => {
       "the vendor API URL, credential and all",
       "https://api.example.invalid/v1/products/8880044.json?show=sku&apiKey=SECRET-KEY",
     ],
+    [
+      "a link with a credential in its userinfo",
+      "https://shopper:SECRET-KEY@www.example.invalid/site/drill/8880044.p",
+    ],
+    [
+      "a link whose userinfo is a bare token",
+      "https://SECRET-KEY@www.example.invalid/site/drill/8880044.p",
+    ],
   ];
 
   for (const [what, listingUrl] of unusable) {
@@ -250,8 +263,9 @@ describe("A9: no link the owner can open means no alert", () => {
       assert.equal(composed.reason, "undeliverable-link");
       assert.equal(composed.listingId, "8880044");
       assert.match(composed.detail, /8880044/);
-      // The refusal never quotes the link: one of the cases above IS a
-      // credential, and a report is a thing people paste into an issue.
+      // The refusal never quotes the link: three of the cases above ARE a
+      // credential, in the query string and in the userinfo, and a report is a
+      // thing people paste into an issue.
       assert.doesNotMatch(composed.detail, /SECRET-KEY/);
     });
   }
