@@ -18,6 +18,8 @@
     "governor:start-check": "node packages/governor/src/cli/start-check.ts",
     "sources:start-check": "node packages/sources/src/cli/start-check.ts",
     "alerts:start-check": "node packages/alerts/src/cli/start-check.ts",
+    "dashboard:start-check": "node packages/dashboard/src/cli/start-check.ts",
+    "dashboard:serve": "node packages/dashboard/src/cli/serve.ts",
     "db:generate": "pnpm --dir packages/db exec drizzle-kit generate",
     "db:init": "node packages/db/src/cli/init.ts",
     "db:start-check": "node packages/db/src/cli/start-check.ts",
@@ -26,6 +28,7 @@
   },
   "devDependencies": {
     "@deal-sentinel/alerts": "*",
+    "@deal-sentinel/dashboard": "*",
     "@deal-sentinel/db": "*",
     "@deal-sentinel/extractor": "*",
     "@deal-sentinel/governor": "*",
@@ -35,6 +38,7 @@
     "@types/pg": "8.11.10",
     "drizzle-kit": "0.30.1",
     "pg": "8.13.1",
+    "playwright": "1.63.0",
     "typescript": "5.7.2"
   }
 }

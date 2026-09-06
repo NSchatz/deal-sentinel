@@ -151,6 +151,8 @@ import type {
 import { holdForResponse } from "./retry-after.ts";
 import { RobotsGate, classifyRobotsStatus } from "./robots.ts";
 import type { RobotsRetrieval } from "./robots.ts";
+import { classifyFetchOutcome } from "./telemetry.ts";
+import type { ClassifiableOutcome, FetchTelemetry } from "./telemetry.ts";
 import { createFetchTransport } from "./transport.ts";
 
 export type GovernedRequest = {
@@ -231,6 +233,19 @@ export type GovernorDependencies = {
   transport: TransportChoice;
   notifier: Notifier;
   allowanceStore: AllowanceStore;
+  /**
+   * Where each offered fetch's outcome and each breaker pause are written down.
+   *
+   * OPTIONAL, and a governor built without one behaves exactly as it did before
+   * the observability phase. A governor built WITH one behaves exactly the same
+   * way too: nothing this port returns is read, every call it makes is wrapped
+   * so that a failure cannot reach the fetch path, and there is no code path on
+   * which a recording decides whether a request leaves. That is not politeness
+   * about a nice-to-have - a recording failure that propagated into a caller
+   * which then retried the fetch would be the runaway scraper this whole package
+   * exists to prevent, built out of a telemetry feature.
+   */
+  telemetry?: FetchTelemetry;
 };
 
 export class Governor {
@@ -242,10 +257,12 @@ export class Governor {
   readonly #breaker: Breaker;
   readonly #allowance: AllowanceLedger;
   readonly #robots: RobotsGate;
+  readonly #telemetry: FetchTelemetry | null;
 
   constructor(dependencies: GovernorDependencies) {
     this.#config = dependencies.config;
     this.#clock = dependencies.clock;
+    this.#telemetry = dependencies.telemetry ?? null;
     // The marker becomes a client HERE and nowhere else. Nothing outside this
     // package can hold the result: it is private to this instance and every
     // send through it has already passed the six gates below.
@@ -288,6 +305,27 @@ export class Governor {
    * a check with a hole in it.
    */
   async request(request: GovernedRequest): Promise<GovernorOutcome> {
+    // OFFERED. The latency this system records is measured from here, because
+    // this is the instant a caller asked for something, and the interesting
+    // number for an operator is how long the answer took to arrive - a refusal
+    // reached after a whole ceiling interval of waiting is a fact about this
+    // system's behaviour just as much as a slow vendor is.
+    const offeredAt = this.#clock.now();
+    const outcome = await this.#offer(request);
+    // KNOWN. After the outcome and after everything the send itself owed, so
+    // that not one statement between the last gate and `#transport.send` is
+    // this method's.
+    await this.#recordFetchOutcome(request.sourceId, offeredAt, outcome);
+    return outcome;
+  }
+
+  /**
+   * The six gates and the send, unchanged.
+   *
+   * Split out from `request` only so that the recording above wraps it without
+   * being interleaved with it. Nothing in here knows telemetry exists.
+   */
+  async #offer(request: GovernedRequest): Promise<GovernorOutcome> {
     const url = parseUrl(request.url);
     const host = hostKey(url);
 
@@ -739,6 +777,23 @@ export class Governor {
   async #recordOutcome(sourceId: string, outcome: OutcomeClass): Promise<void> {
     const paused = this.#breaker.record(sourceId, outcome);
     if (paused === null) return;
+
+    // The breaker's return value is the ONLY place a pause is announced, which
+    // is what makes "exactly once per pause" a property of that method rather
+    // than of its callers. The durable record is written from here for the same
+    // reason: anything that polled `status()` instead would write a row for
+    // every request that arrived behind the pause.
+    await this.#recordBreakerPause({
+      sourceId,
+      pausedAt: new Date(paused.pausedAt),
+      expiresAt: new Date(paused.expiresAt),
+      failingCount: paused.failingCount,
+      windowOutcomes: paused.windowOutcomes,
+      windowMs: paused.windowMs,
+      failureRateThreshold: String(paused.failureRateThreshold),
+      condition: paused.detail,
+    });
+
     await this.#notifier.notify({
       kind: "breaker-paused",
       sourceId,
@@ -747,9 +802,94 @@ export class Governor {
     });
   }
 
+  /**
+   * Write down what happened to one offered fetch.
+   *
+   * EVERY FAILURE IS SWALLOWED, and that is the criterion rather than a
+   * convenience. A recording that threw would reach whichever caller offered the
+   * fetch, and the honest thing for that caller to do with an exception is
+   * usually to try again - which would re-offer a request to a third party, from
+   * the household's own address, on account of a database being briefly busy.
+   * This system does not get to make that trade. A lost telemetry row is a gap
+   * in a chart; a retry earned by a lost telemetry row is traffic that no re-run
+   * undoes.
+   *
+   * `onRecordFailure` is how a caller who wants to know is told, and it is
+   * wrapped by the same `try` so that an observer cannot become the thing that
+   * throws either.
+   */
+  async #recordFetchOutcome(
+    sourceId: string,
+    offeredAt: number,
+    outcome: GovernorOutcome,
+  ): Promise<void> {
+    const telemetry = this.#telemetry;
+    if (telemetry === null) return;
+
+    try {
+      const knownAt = this.#clock.now();
+      const classification = classifyFetchOutcome(
+        classifiableOutcome(outcome),
+        telemetry.limitExceededStatusesFor?.(sourceId) ?? [],
+      );
+      await telemetry.record({
+        sourceId,
+        outcomeClass: classification.outcomeClass,
+        latencyMs: Math.max(0, Math.round(knownAt - offeredAt)),
+        occurredAt: new Date(knownAt),
+        condition: classification.condition,
+      });
+    } catch (error) {
+      this.#reportRecordFailure(error);
+    }
+  }
+
+  /** The same protection, for the pause record. Same reason, to the letter. */
+  async #recordBreakerPause(pause: {
+    sourceId: string;
+    pausedAt: Date;
+    expiresAt: Date;
+    failingCount: number;
+    windowOutcomes: number;
+    windowMs: number;
+    failureRateThreshold: string;
+    condition: string;
+  }): Promise<void> {
+    const telemetry = this.#telemetry;
+    if (telemetry === null || telemetry.recordPause === undefined) return;
+    try {
+      await telemetry.recordPause(pause);
+    } catch (error) {
+      this.#reportRecordFailure(error);
+    }
+  }
+
+  #reportRecordFailure(error: unknown): void {
+    try {
+      this.#telemetry?.onRecordFailure?.(error);
+    } catch {
+      // An observer that throws is not permitted to become the failure the
+      // observer exists to report. There is nowhere left to report it to, and
+      // reaching the fetch path is the one outcome that is not allowed.
+    }
+  }
+
   #breakerSettingsFor(sourceId: string): BreakerSettings {
     return this.#config.sources[sourceId]?.breaker ?? this.#config.breaker;
   }
+}
+
+/**
+ * The chokepoint's own outcome, reduced to the three shapes the classification
+ * can tell apart: this system declined, the request left and nothing usable came
+ * back, or the far side answered with a status.
+ */
+function classifiableOutcome(outcome: GovernorOutcome): ClassifiableOutcome {
+  if (outcome.ok) return { kind: "response", status: outcome.response.status };
+  if (outcome.reason === "transport-error") {
+    return { kind: "transport-error", detail: outcome.detail };
+  }
+  return { kind: "refused", reason: outcome.reason, detail: outcome.detail };
 }
 
 /** A product fetch: any 4xx or 5xx is an error or a block against the breaker. */

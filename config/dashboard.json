@@ -1,0 +1,54 @@
+{
+  "_comment": [
+    "THE NUMBERS IN THIS FILE ARE CONSERVATIVE AND UNVALIDATED.",
+    "BRIEF.md deliberately fixes no threshold and CLAUDE.md rule 8 forbids",
+    "inventing one and then treating it as decided. Every value here exists so",
+    "that a setting EXISTS and is enforced; none of them has been checked",
+    "against how this system actually behaves over weeks, because it has not",
+    "run for weeks yet. Change them deliberately, in a commit that says why.",
+    "Keys beginning with an underscore are comments and are ignored by the",
+    "loader. Every other key is required: the dashboard has no built-in default",
+    "and refuses to start on a file that is missing one.",
+
+    "bindAddress is LOOPBACK. This is the first listening socket this system",
+    "has ever had, and the page behind it renders vendor refusal details that",
+    "are derived from URLs carrying a credential in the query string. This must",
+    "be a literal IP address, and the loader REFUSES the unspecified address in",
+    "either family however it is spelled - it parses the value and looks at its",
+    "bytes, because 0.0.0.0, ::, ::0, ::ffff:0.0.0.0 and 0 are one address",
+    "written five ways and this runtime binds all five to every interface. A",
+    "name is refused as well: a resolver answers at listen time and what it",
+    "answers is not what this file said. A specific LAN address is permitted if",
+    "the owner puts one here deliberately; there is no authentication, no TLS",
+    "and no accounts, so anything that can reach the socket sees everything.",
+
+    "stalenessHorizonMs is how old a source's most recent SUCCESSFUL fetch may",
+    "be before the page reports that source as BROKEN. 48 hours: the collection",
+    "cadence is the owner's and is not fixed anywhere in this repository, so",
+    "the horizon is set well past a daily run rather than tuned to one. Too",
+    "long and a dead source reads as quiet, which is the failure the roadmap",
+    "phase's fail-safe names; too short and everything reads broken and nobody",
+    "looks twice. Nobody has lived with this system long enough to know the",
+    "right number - this one is a starting point to be moved, not a finding.",
+
+    "ratePeriodMs is what the success, error and block rates on the overview",
+    "are computed over: 24 hours, matching the allowance period the governor is",
+    "configured with, so the two halves of the page describe the same day.",
+
+    "defaultChartRangeMs is how much of a listing's history the chart shows",
+    "when nobody has asked for a range: 90 days, which is the window the brief",
+    "talks about historical lows over.",
+
+    "conditionHistoryLimit is how many recent conditions, pauses and stops a",
+    "source's detail lists. Bounded so that one badly behaved source cannot",
+    "make the page enormous."
+  ],
+
+  "bindAddress": "127.0.0.1",
+  "port": 8787,
+
+  "stalenessHorizonMs": 172800000,
+  "ratePeriodMs": 86400000,
+  "defaultChartRangeMs": 7776000000,
+  "conditionHistoryLimit": 20
+}

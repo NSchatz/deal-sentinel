@@ -1,0 +1,22 @@
+{
+  "name": "@deal-sentinel/dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The local, read-only operator view: per-source health from the recorded fetch outcomes, allowance consumed and remaining, breaker pauses and vendor stops with their conditions, and any tracked listing's price history as a time series. Binds the loopback address its configuration names, writes nothing, and makes no outbound request of any kind.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "bin": {
+    "dashboard-start-check": "./src/cli/start-check.ts",
+    "dashboard-serve": "./src/cli/serve.ts"
+  },
+  "dependencies": {
+    "@deal-sentinel/db": "*",
+    "@deal-sentinel/extractor": "*",
+    "@deal-sentinel/governor": "*",
+    "@deal-sentinel/sources": "*"
+  }
+}

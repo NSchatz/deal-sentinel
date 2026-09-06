@@ -30,6 +30,32 @@ export type BreakerStatus =
   | { paused: false }
   | { paused: true; until: number; detail: string };
 
+/**
+ * A pause, announced once, with the condition that caused it in parts.
+ *
+ * `detail` is the same sentence this class has always returned. The numbered
+ * fields beside it are the SAME condition, unformatted, because a durable record
+ * that only carried the sentence would leave a later reader parsing English to
+ * answer "what threshold was in force when this fired" - and the answer would
+ * silently change shape the next time somebody edited the wording.
+ */
+export type BreakerPauseAnnouncement = {
+  paused: true;
+  detail: string;
+  /** How many outcomes in the window were an error or a block. */
+  failingCount: number;
+  /** How many outcomes were in the window altogether. */
+  windowOutcomes: number;
+  /** The configured window they were counted over. */
+  windowMs: number;
+  /** The configured threshold that was crossed. */
+  failureRateThreshold: number;
+  /** The instant the pause began, on this breaker's own clock. */
+  pausedAt: number;
+  /** The instant it ends. */
+  expiresAt: number;
+};
+
 type SourceState = {
   outcomes: Array<{ at: number; outcome: OutcomeClass }>;
   pausedUntil: number;
@@ -74,7 +100,7 @@ export class Breaker {
    * makes "notify once per pause" a property of this method rather than of its
    * callers.
    */
-  record(sourceId: string, outcome: OutcomeClass): { paused: true; detail: string } | null {
+  record(sourceId: string, outcome: OutcomeClass): BreakerPauseAnnouncement | null {
     const state = this.#stateFor(sourceId);
     const now = this.#clock.now();
     if (state.pausedUntil > now) return null;
@@ -97,7 +123,16 @@ export class Breaker {
       `${rate.toFixed(2)} against the configured threshold of ` +
       `${settings.failureRateThreshold}. This source is paused for ` +
       `${settings.pauseMs}ms; every other source keeps running.`;
-    return { paused: true, detail: state.pauseDetail };
+    return {
+      paused: true,
+      detail: state.pauseDetail,
+      failingCount: failures,
+      windowOutcomes: total,
+      windowMs: settings.windowMs,
+      failureRateThreshold: settings.failureRateThreshold,
+      pausedAt: now,
+      expiresAt: state.pausedUntil,
+    };
   }
 
   #stateFor(sourceId: string): SourceState {

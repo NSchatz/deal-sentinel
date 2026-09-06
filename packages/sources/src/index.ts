@@ -52,6 +52,9 @@ export {
 } from "./credential.ts";
 export type { Redactor } from "./credential.ts";
 
+export { displayRedactor, redactedTelemetry } from "./telemetry.ts";
+export type { TelemetryWiring } from "./telemetry.ts";
+
 export { isValidTimeZone, readVendorTimestamp, zonedNaiveToInstant } from "./time-zone.ts";
 
 export { mapVendorPayload } from "./bestbuy/mapping.ts";

@@ -57,6 +57,38 @@
  * The allowlist is deliberately by exact path and by rule. Widening it is a
  * visible, reviewable diff, which is the point.
  *
+ * A SERVER SOCKET IS NOT A CLIENT, and the one exemption below says so as a
+ * RULE rather than as another path on the allowlist. `node:http` is banned by
+ * specifier because importing it hands you `request` and `get`, and a renamed
+ * binding leaves no call the other rules would recognise. But the module also
+ * holds `createServer`, which cannot send anything anywhere: it accepts inbound
+ * connections and that is all it does. So an import from `node:http` whose
+ * bindings are ALL drawn from the small server-side list in
+ * `SERVER_ONLY_HTTP_BINDINGS` is not a client import.
+ *
+ * Why a rule and not an allowlist entry: an allowlist entry says "this FILE may
+ * name a client", which is exactly the wrong claim about a file that serves. It
+ * would also have to be re-granted for every process that ever binds a port, and
+ * each grant would carry the client rules along with it. The rule instead
+ * narrows what may be imported, everywhere, for everybody: `import http from
+ * "node:http"`, `import * as http from "node:http"`, `import { request } from
+ * "node:http"` and any binding not on the list are all still findings, in every
+ * file, and so is every other specifier - `node:net` and `node:tls` included,
+ * which is why the loopback stub server is still allowlisted for the socket type
+ * it imports.
+ *
+ * THE EXEMPTION IS SCOPED TO THE IMPORT AND NOT TO THE LINE IT SITS ON. A line
+ * is a unit of formatting, not a unit of meaning: two imports can share one, and
+ * a formatter joining them is a whitespace diff nobody reads. Exempting the line
+ * would hand the server-only import's verdict to whatever was written beside it,
+ * so `import { createServer } from "node:http"; import { request } from
+ * "node:https";` would pass. It does not. The exemption covers the CHARACTERS
+ * the server-only import occupies, and a match outside them is a finding however
+ * close it was written.
+ *
+ * `test/unit/no-direct-http.test.ts` proves both halves against committed
+ * fixtures, because an exemption nobody showed can fail is a hole.
+ *
  * `test/unit/no-direct-http.test.ts` proves this check can FAIL before it
  * believes that it passes: it runs the same function over committed fixture
  * call sites that bypass the governor and asserts the findings, then runs it
@@ -297,6 +329,169 @@ const RULES: readonly Rule[] = [
   },
 ];
 
+/* -------------------------------------------------------------------------- */
+/* The one exemption: an import that can only serve                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Everything `node:http` exports that cannot put a request on the wire.
+ *
+ * `createServer` accepts connections. The rest are TYPES, which do not exist at
+ * run time at all. Deliberately absent, and each absence is the whole point:
+ * `request`, `get`, `Agent`, `ClientRequest`, and the default and namespace
+ * imports that reach all of them.
+ *
+ * Adding a name here is a change to what this repository considers incapable of
+ * sending, and it is a reviewable one-line diff for exactly that reason.
+ */
+export const SERVER_ONLY_HTTP_BINDINGS: readonly string[] = [
+  "createServer",
+  "Server",
+  "ServerOptions",
+  "ServerResponse",
+  "IncomingMessage",
+  "IncomingHttpHeaders",
+  "OutgoingHttpHeaders",
+  "RequestListener",
+];
+
+/** The rules a server-only import is exempt from, and no others. */
+const SERVER_IMPORT_EXEMPT_RULES = ["client-import", "client-module-literal"];
+
+/**
+ * A braced import from `node:http`, over however many lines it is written on.
+ * The specifier is pinned to `node:http` alone: no other module on the client
+ * list has a server in it, and widening this to a pattern would be widening the
+ * exemption to modules nobody has looked at.
+ */
+const BRACED_HTTP_IMPORT = /\bimport\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']node:http["']/g;
+
+/** A half-open character range `[start, end)` of the comment-stripped source. */
+export type SourceSpan = { start: number; end: number };
+
+/**
+ * The character SPANS covered by an import from `node:http` that binds nothing
+ * but server-side names.
+ *
+ * A SPAN AND NOT A LINE. A line is not the unit a verdict about an import
+ * belongs to: two imports can share one physical line - a formatter joining
+ * them is enough, and nobody reviews a whitespace change - and exempting the
+ * line would hand one import's verdict to the other. `import { createServer }
+ * from "node:http"; import { request } from "node:https";` is a client import,
+ * and it is one whether or not something that cannot send is written beside it.
+ *
+ * Takes the COMMENT-STRIPPED view, so a sentence about such an import is not one.
+ */
+export function serverOnlyImportSpans(source: string): SourceSpan[] {
+  const spans: SourceSpan[] = [];
+
+  BRACED_HTTP_IMPORT.lastIndex = 0;
+  let match: RegExpExecArray | null = BRACED_HTTP_IMPORT.exec(source);
+  while (match !== null) {
+    const bindings = match[1]
+      .split(",")
+      .map((binding) => binding.trim())
+      .filter((binding) => binding.length > 0)
+      // `X as Y` binds X. The local name is the author's; what matters is which
+      // export was reached for.
+      .map((binding) => binding.replace(/^type\s+/, "").split(/\s+as\s+/)[0].trim());
+
+    const serverOnly =
+      bindings.length > 0 &&
+      bindings.every((binding) => SERVER_ONLY_HTTP_BINDINGS.includes(binding));
+
+    if (serverOnly) {
+      spans.push({ start: match.index, end: match.index + match[0].length });
+    }
+
+    match = BRACED_HTTP_IMPORT.exec(source);
+  }
+
+  return spans;
+}
+
+/**
+ * The 1-based line numbers a server-only import touches.
+ *
+ * Reported, never enforced: the exemption is decided per SPAN above. This is
+ * here so a reader and a test can see which lines such an import occupies,
+ * including the multi-line spelling.
+ */
+export function serverOnlyImportLines(source: string): Set<number> {
+  const lines = new Set<number>();
+  const lineStarts = lineStartOffsets(source);
+  for (const span of serverOnlyImportSpans(source)) {
+    const first = lineAt(lineStarts, span.start);
+    const last = lineAt(lineStarts, span.end);
+    for (let line = first; line <= last; line += 1) lines.add(line);
+  }
+  return lines;
+}
+
+/** The character offset each line begins at, 0-based index, 1-based line. */
+function lineStartOffsets(source: string): number[] {
+  const starts = [0];
+  for (let index = 0; index < source.length; index += 1) {
+    if (source[index] === "\n") starts.push(index + 1);
+  }
+  return starts;
+}
+
+/** The 1-based line an offset falls on. */
+function lineAt(lineStarts: readonly number[], offset: number): number {
+  let line = 1;
+  for (let index = 0; index < lineStarts.length; index += 1) {
+    if (lineStarts[index] <= offset) line = index + 1;
+    else break;
+  }
+  return line;
+}
+
+/**
+ * A global twin of each rule's pattern, so every match on a line can be walked
+ * rather than only the first. `test` answers whether a line matches; the
+ * exemption has to know WHERE it matched, and how many times.
+ */
+const GLOBAL_PATTERNS = new Map<string, RegExp>(
+  RULES.map((rule) => [
+    rule.name,
+    new RegExp(rule.pattern.source, `${rule.pattern.flags.replace("g", "")}g`),
+  ]),
+);
+
+/**
+ * Is EVERY match of this rule on this line inside a server-only import?
+ *
+ * Every, not any: a line carrying one server-only import and one client import
+ * has a match outside the exempt span, and that match is the finding.
+ */
+function everyMatchIsServerOnly(
+  ruleName: string,
+  subject: string,
+  lineStart: number,
+  spans: readonly SourceSpan[],
+): boolean {
+  const pattern = GLOBAL_PATTERNS.get(ruleName);
+  if (pattern === undefined) return false;
+  pattern.lastIndex = 0;
+
+  let matched = false;
+  let match: RegExpExecArray | null = pattern.exec(subject);
+  while (match !== null) {
+    matched = true;
+    const start = lineStart + match.index;
+    const end = start + match[0].length;
+    const covered = spans.some((span) => span.start <= start && end <= span.end);
+    if (!covered) return false;
+    // A zero-length match would spin here. No rule has one, and this costs a
+    // comparison to say so.
+    if (match.index === pattern.lastIndex) pattern.lastIndex += 1;
+    match = pattern.exec(subject);
+  }
+
+  return matched;
+}
+
 /** The identifiers a computed access with a literal key is rewritten for. */
 const COMPUTED_ACCESS = [GLOBAL_CLIENT, TRANSPORT_FACTORY, ...SOCKET_CLIENTS].map(
   (identifier) => ({
@@ -371,12 +566,25 @@ export function findDirectHttpCallSites(
 
     const sourceLines = source.split("\n");
     const codeLines = code.split("\n");
+    const lineStarts = lineStartOffsets(source);
+    // An import from `node:http` binding nothing but server-side names. Not an
+    // allowlisted FILE and not an exempted LINE: a rule about what was
+    // imported, applied to the characters that import occupies and to no
+    // others, everywhere.
+    const serving = serverOnlyImportSpans(source);
 
     sourceLines.forEach((line, index) => {
       for (const rule of RULES) {
         const subject = rule.scans === "code" ? (codeLines[index] ?? "") : line;
         if (!rule.pattern.test(subject)) continue;
         if (allowed !== undefined && allowed.rules.includes(rule.name)) continue;
+        if (
+          serving.length > 0 &&
+          SERVER_IMPORT_EXEMPT_RULES.includes(rule.name) &&
+          everyMatchIsServerOnly(rule.name, subject, lineStarts[index] ?? 0, serving)
+        ) {
+          continue;
+        }
         findings.push({
           path: file.path,
           line: index + 1,

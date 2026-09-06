@@ -37,6 +37,25 @@ export class InvalidObservationError extends Error {
   }
 }
 
+/**
+ * A read path was pointed at a history database whose schema predates the
+ * tables that read needs.
+ *
+ * Separate from `HistoryNotInitializedError`, which says the volume was never
+ * initialized at all. This one says the volume is real, the history is real,
+ * and this BUILD is ahead of it - a different fix, and a different sentence.
+ */
+export class OpsSchemaBehindError extends Error {
+  /** The tables the database does not carry. */
+  readonly missingTables: readonly string[];
+
+  constructor(missingTables: readonly string[], detail: string) {
+    super(detail);
+    this.name = "OpsSchemaBehindError";
+    this.missingTables = [...missingTables];
+  }
+}
+
 /** No connection string was configured. */
 export class MissingDatabaseUrlError extends Error {
   constructor(variable: string) {

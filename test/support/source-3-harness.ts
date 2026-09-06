@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { createMemoryAllowanceStore } from "@deal-sentinel/governor";
 import type {
   AllowanceStore,
+  FetchTelemetry,
   Governor,
   GovernorConfig,
   TransportRequest,
@@ -241,6 +242,8 @@ export function sourceHarness(options: {
   registry?: SourceRegistry;
   clock?: FakeClock;
   allowanceStore?: AllowanceStore;
+  /** Omitted, nothing is recorded. Supplied, every offered fetch is. */
+  telemetry?: FetchTelemetry;
 } = {}): SourceHarness {
   const clock = options.clock ?? new FakeClock();
   const transport = recordingTransport(
@@ -252,6 +255,7 @@ export function sourceHarness(options: {
     clock,
     config: options.config ?? bestBuyGovernorConfig(),
     allowanceStore: options.allowanceStore ?? createMemoryAllowanceStore(),
+    telemetry: options.telemetry,
   });
 
   return {

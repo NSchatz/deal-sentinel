@@ -51,7 +51,21 @@ export { createMemoryAllowanceStore } from "./allowance-store-memory.ts";
 export { createPostgresAllowanceStore } from "./allowance-store-postgres.ts";
 
 export { Breaker } from "./breaker.ts";
-export type { BreakerStatus, OutcomeClass } from "./breaker.ts";
+export type {
+  BreakerPauseAnnouncement,
+  BreakerStatus,
+  OutcomeClass,
+} from "./breaker.ts";
+
+export { TOO_MANY_REQUESTS, classifyFetchOutcome } from "./telemetry.ts";
+export type {
+  BreakerPauseRecord,
+  ClassifiableOutcome,
+  FetchClassification,
+  FetchOutcomeClass,
+  FetchOutcomeRecord,
+  FetchTelemetry,
+} from "./telemetry.ts";
 
 export { HostScheduler } from "./host-scheduler.ts";
 export type { Release } from "./host-scheduler.ts";
@@ -100,12 +114,15 @@ export type { StartCheckReport } from "./system.ts";
 
 export {
   HTTP_CLIENT_ALLOWLIST,
+  SERVER_ONLY_HTTP_BINDINGS,
   collectSourceFiles,
   describeFindings,
   describeRules,
   findDirectHttpCallSites,
   maskStringLiterals,
   normaliseComputedAccess,
+  serverOnlyImportLines,
+  serverOnlyImportSpans,
   stripComments,
 } from "./no-direct-http.ts";
 export type {
@@ -113,4 +130,5 @@ export type {
   DirectHttpFinding,
   ScanTarget,
   SourceFile,
+  SourceSpan,
 } from "./no-direct-http.ts";

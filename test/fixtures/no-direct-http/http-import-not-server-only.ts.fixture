@@ -1,0 +1,29 @@
+/**
+ * The three shapes the server exemption must NOT cover, one per line.
+ *
+ * Each of these reaches a client through the very module the exemption names,
+ * and each is a spelling somebody would reach for if the exemption were written
+ * as "node:http is fine now".
+ */
+
+import http from "node:http";
+import * as alsoHttp from "node:http";
+import { request as ask } from "node:http";
+import { createServer, get } from "node:http";
+
+export function one(url: string): void {
+  http.get(url);
+}
+
+export function two(url: string): void {
+  alsoHttp.request(url);
+}
+
+export function three(url: string): void {
+  ask(url);
+}
+
+export function four(url: string): void {
+  get(url);
+  createServer();
+}
