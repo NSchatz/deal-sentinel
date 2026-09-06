@@ -1,0 +1,49 @@
+{
+  "_comment": [
+    "WHAT THE OWNER CHOSE. What each source's own published TERMS require is",
+    "not here: it is in packages/sources/src/terms.ts, quoted from the vendor's",
+    "documents. Keeping the two apart is what lets this system detect a source",
+    "configured WITHOUT a ceiling its terms declare - if both facts lived in",
+    "this file, an absent ceiling and a source with no ceiling would be the",
+    "same document.",
+    "Nothing here has a built-in default. A source missing a required setting",
+    "does not run, and the refusal names the source and the setting.",
+    "Keys beginning with an underscore are comments and are ignored."
+  ],
+
+  "sources": {
+    "_comment": [
+      "One entry per source this system may read. Every source named here must",
+      "also carry a host ceiling and, where its vendor publishes a limit, a",
+      "metered allowance in config/governor.json - the governor's first two",
+      "gates refuse an unconfigured host and an unknown source."
+    ],
+
+    "bestbuy-api": {
+      "_comment": [
+        "The one retailer that publishes an official API.",
+        "baseUrl is the documented API root; a single-product call is built",
+        "under it as /products/<sku>.json.",
+        "currency and timeZone are DECLARATIONS and not readings: the vendor's",
+        "documentation publishes neither anywhere. The currency decides the",
+        "ISO 4217 minor-unit exponent, so getting it wrong is a wrong NUMBER",
+        "and not a wrong label; the time zone is stored beside every instant",
+        "because a 90-day low is anchored to the retailer's local day, and it",
+        "is also how a zone-less priceUpdateDate becomes an instant at all.",
+        "rawContextRetentionHours is 24, well inside the 72 hours the terms",
+        "permit cached Content to be held: this system needs the raw payload",
+        "only long enough to debug a mapping break, and holding less than a",
+        "third party permits is always allowed while holding more never is.",
+        "credentialVariable names the environment variable the API key is read",
+        "from. The key itself is never in this file, never in a stored row,",
+        "never in a notification body and never in a log line."
+      ],
+      "baseUrl": "https://api.bestbuy.com/v1",
+      "currency": "USD",
+      "timeZone": "America/New_York",
+      "rawContextRetentionHours": 24,
+      "credentialVariable": "BESTBUY_API_KEY",
+      "attributionNotice": "Product information provided by Best Buy"
+    }
+  }
+}

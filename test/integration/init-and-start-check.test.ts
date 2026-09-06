@@ -148,6 +148,45 @@ describe("the one-time initialization action", () => {
       assert.equal(marker.schemaVersion, "0000_history_1_price_observations");
     });
   });
+
+  /**
+   * Acceptance criterion 21 of spec S0033-deal-sentinel-source-3:
+   *
+   *   WHEN the watchlist and the retention policy have been added THE SYSTEM
+   *   SHALL still start against a database provisioned by the documented
+   *   initialization path, and SHALL still refuse to start on an uninitialized
+   *   volume.
+   *
+   * The refusal half is graded by the two blocks either side of this one, which
+   * are unchanged. This half is the provisioning: the SAME documented action,
+   * with no extra step and no operator SQL, now creates the tables SOURCE-3
+   * needs as well - because they are in the committed migration set that action
+   * applies, and there is no second path that could apply them instead.
+   */
+  it("provisions the watchlist and the source-stop tables by the same action", async () => {
+    const tables = await query(
+      first.url,
+      "select to_regclass('public.watchlist_entries')::text as watchlist, " +
+        "to_regclass('public.source_period_stops')::text as stops",
+    );
+    assert.deepEqual(tables[0], {
+      watchlist: "watchlist_entries",
+      stops: "source_period_stops",
+    });
+  });
+
+  it("makes raw content deletable, which the retention policy needs", async () => {
+    // The retention job empties this column and leaves the observation behind,
+    // so the column has to be nullable. Asked of the catalogue rather than of
+    // the schema file, because the question is what the MIGRATION did.
+    const columns = await query(
+      first.url,
+      "select is_nullable from information_schema.columns " +
+        "where table_name = 'price_observations' and column_name = 'raw_context'",
+    );
+    assert.equal(columns.length, 1);
+    assert.equal(columns[0].is_nullable, "YES");
+  });
 });
 
 describe("a volume that was initialized and has since been wiped", () => {

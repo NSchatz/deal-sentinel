@@ -20,6 +20,9 @@ importers:
       '@deal-sentinel/shared':
         specifier: '*'
         version: link:packages/shared
+      '@deal-sentinel/sources':
+        specifier: '*'
+        version: link:packages/sources
       '@types/node':
         specifier: 22.10.2
         version: 22.10.2
@@ -70,6 +73,21 @@ importers:
         version: 8.13.1
 
   packages/shared: {}
+
+  packages/sources:
+    dependencies:
+      '@deal-sentinel/db':
+        specifier: '*'
+        version: link:../db
+      '@deal-sentinel/extractor':
+        specifier: '*'
+        version: link:../extractor
+      '@deal-sentinel/governor':
+        specifier: '*'
+        version: link:../governor
+      '@deal-sentinel/shared':
+        specifier: '*'
+        version: link:../shared
 
 packages:
 

@@ -53,6 +53,9 @@ import {
   stripComments,
 } from "@deal-sentinel/governor";
 import type { SourceFile } from "@deal-sentinel/governor";
+import * as sources from "@deal-sentinel/sources";
+
+import { fixtureAnswer, sourceHarness } from "../support/source-3-harness.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -345,6 +348,110 @@ describe("the package's public surface hands out nothing that can send", () => {
   });
 });
 
+/**
+ * Acceptance criterion 5 of spec S0033-deal-sentinel-source-3:
+ *
+ *   WHEN the adapter fetches anything from the vendor THE SYSTEM SHALL obtain
+ *   it through the existing governor chokepoint, and THE SYSTEM SHALL offer no
+ *   path from adapter code to an HTTP client that bypasses it.
+ *
+ * The tree-wide scan below already proves the second half for every file that
+ * exists. This block is about the FIRST package that has a reason to want a
+ * client, and it asserts three things the tree-wide pass alone would not:
+ *
+ *   - the adapter package is not, and cannot quietly become, allowlisted;
+ *   - a bypass parked inside it IS reported, so the pass over the real file
+ *     means something;
+ *   - the package hands out nothing that can send, and its adapter reaches the
+ *     network only by asking a Governor for it.
+ */
+describe("criterion 5: the adapter package has no way around the chokepoint", () => {
+  it("is not on the allowlist, at any path under it", () => {
+    for (const entry of HTTP_CLIENT_ALLOWLIST) {
+      assert.equal(
+        entry.path.startsWith("packages/sources/"),
+        false,
+        `${entry.path} is allowlisted, so the adapter package may name a client`,
+      );
+    }
+  });
+
+  it("reports a bypass parked inside the adapter itself", () => {
+    const findings = findDirectHttpCallSites([
+      fixture("bypassing-adapter.ts.fixture", "packages/sources/src/bestbuy/adapter.ts"),
+    ]);
+    assert.ok(
+      findings.some((finding) => finding.rule === "fetch-call"),
+      "a client call in the adapter's own path was not reported, so the pass " +
+        "over the real adapter proves nothing",
+    );
+  });
+
+  it("reports one reaching this package's own ungoverned transport from there", () => {
+    const findings = findDirectHttpCallSites([
+      fixture("transport-factory-bypass.ts.fixture", "packages/sources/src/wiring.ts"),
+    ]);
+    assert.ok(findings.some((finding) => finding.rule === "ungoverned-transport"));
+  });
+
+  it("finds nothing in the adapter package as it stands", () => {
+    const files = collectSourceFiles(REPO_ROOT).filter((file) =>
+      file.path.startsWith("packages/sources/"),
+    );
+    assert.ok(files.length >= 8, `only ${files.length} adapter files were scanned`);
+    assert.deepEqual(
+      findDirectHttpCallSites(files),
+      [],
+      describeFindings(findDirectHttpCallSites(files)),
+    );
+  });
+
+  it("exports no value carrying a send method, and no transport factory", () => {
+    assert.equal(
+      Object.keys(sources).some((name) => /Transport$/.test(name)),
+      false,
+      `the sources package exports ${Object.keys(sources).join(", ")}`,
+    );
+    for (const [name, value] of Object.entries(sources)) {
+      if (typeof value !== "object" || value === null) continue;
+      assert.equal(
+        typeof (value as { send?: unknown }).send,
+        "undefined",
+        `${name} is exported and can send; only Governor.request may`,
+      );
+    }
+  });
+
+  it("gives its adapter no way to reach the network but a Governor", async () => {
+    // The dependency list IS the property: a governor, a registry entry and a
+    // credential. There is no transport argument and no default to fall back
+    // to, so an adapter built with a stubbed governor reaches exactly what
+    // that governor reaches, which here is a recording stub and nothing else.
+    const harness = sourceHarness({
+      answers: { "8880044": fixtureAnswer("product-on-sale.json") },
+    });
+    const adapter = sources.bestBuyAdapter({
+      governor: harness.governor,
+      entry: harness.registry.require("bestbuy-api"),
+      credential: "unused-in-this-assertion",
+    });
+
+    assert.equal(typeof adapter.observe, "function");
+    assert.equal((adapter as { send?: unknown }).send, undefined);
+
+    const outcome = await adapter.observe("8880044");
+    assert.equal(outcome.kind, "observed");
+    // Everything it received came back through the governor's own transport,
+    // which is the stub. Nothing reached a real client.
+    assert.ok(
+      harness.transport.sent.every((request) =>
+        request.url.startsWith("https://api.bestbuy.com/"),
+      ),
+      "a request left for somewhere the adapter was never pointed at",
+    );
+  });
+});
+
 describe("the check accepts a call site that goes through the governor", () => {
   it("finds nothing in an adapter that asks the governor", () => {
     const findings = findDirectHttpCallSites([
@@ -376,6 +483,11 @@ describe("the tree as it stands has exactly one way out of the process", () => {
       "packages/governor/src/governor.ts",
       "packages/extractor/src/index.ts",
       "packages/db/src/write-path.ts",
+      // The adapter package. It is the first thing in this repository that
+      // makes a real outbound request possible, so a scan that did not read it
+      // would be proving the property about the code that cannot send.
+      "packages/sources/src/bestbuy/adapter.ts",
+      "packages/sources/src/run.ts",
       "test/support/loopback-server.ts",
     ]) {
       assert.ok(

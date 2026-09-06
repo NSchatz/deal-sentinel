@@ -1,0 +1,9 @@
+{
+  "canonicalUrl": "/v1/products/8880044.json?show=sku,name,salePrice,regularPrice,onSale,priceUpdateDate&format=json&apiKey=fixture-api-key-do-not-use",
+  "sku": 8880044,
+  "name": "Batman Begins (Blu-ray Disc)",
+  "salePrice": 7.99,
+  "regularPrice": 9.99,
+  "onSale": true,
+  "priceUpdateDate": "2026-09-05T14:32:00"
+}

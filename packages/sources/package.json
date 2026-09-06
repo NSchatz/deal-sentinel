@@ -1,0 +1,21 @@
+{
+  "name": "@deal-sentinel/sources",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The sources a price comes from: the per-source registry of terms and configuration, the adapters behind one common interface, the collection run over the watchlist, the raw-content retention job, and the attribution a display or export path must carry. Reaches the network only through Governor.request.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "bin": {
+    "sources-start-check": "./src/cli/start-check.ts"
+  },
+  "dependencies": {
+    "@deal-sentinel/db": "*",
+    "@deal-sentinel/extractor": "*",
+    "@deal-sentinel/governor": "*",
+    "@deal-sentinel/shared": "*"
+  }
+}

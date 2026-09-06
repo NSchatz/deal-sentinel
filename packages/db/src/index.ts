@@ -40,12 +40,17 @@ export {
   governorAllowanceUsage,
   historyInitialization,
   priceObservations,
+  sourcePeriodStops,
+  watchlistEntries,
 } from "./schema.ts";
 export type {
   GovernorAllowanceUsageRow,
   InitializationMarkerRow,
   NewPriceObservationRow,
+  NewWatchlistEntryRow,
   PriceObservationRow,
+  SourcePeriodStopRow,
+  WatchlistEntryRow,
 } from "./schema.ts";
 
 export { boundRawContext, drizzleWriter, recordObservation } from "./write-path.ts";
@@ -55,3 +60,17 @@ export type {
   WriteOutcome,
   WriteRefused,
 } from "./write-path.ts";
+
+export {
+  addWatchlistEntry,
+  drizzleWatchlist,
+  memoryWatchlist,
+  setWatchlistEntryEnabled,
+} from "./watchlist.ts";
+export type { WatchlistEntry, WatchlistStore } from "./watchlist.ts";
+
+export { sweepExpiredRawContent } from "./retention.ts";
+export type { RetentionSweep } from "./retention.ts";
+
+export { drizzleSourceStops, memorySourceStops } from "./source-stops.ts";
+export type { SourceStop, SourceStopStore } from "./source-stops.ts";

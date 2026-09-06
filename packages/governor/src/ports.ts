@@ -25,11 +25,21 @@ export type Clock = {
  */
 export type RandomSource = () => number;
 
-/** What the governor tells the outside world about, and nothing more. */
+/**
+ * What this system tells the outside world about, and nothing more.
+ *
+ * The first three are the governor's own conditions. The fourth is a SOURCE's:
+ * a vendor that answers "the allocated call limit has been exceeded" has
+ * stopped the source itself, and calling that `allowance-stop` would say this
+ * system reached its own configured cap when it did not. The two conditions
+ * want different actions from an operator - one is a local number to raise, the
+ * other is a real refusal from a third party - so they are different words.
+ */
 export type NotificationKind =
   | "breaker-paused"
   | "allowance-warn"
-  | "allowance-stop";
+  | "allowance-stop"
+  | "source-limit-exceeded";
 
 export type Notification = {
   kind: NotificationKind;
