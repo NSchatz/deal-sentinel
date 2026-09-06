@@ -161,6 +161,12 @@ export type GovernedRequest = {
   headers?: Record<string, string>;
   /** Overrides `config.http.maxResponseBytes` downwards for one request. */
   maxBytes?: number;
+  /**
+   * The request body, for a caller that carries one. Nothing that READS a price
+   * sets it; a notification channel does, and it reaches the wire through this
+   * same method so that a body is not a reason to hold a client of one's own.
+   */
+  body?: string;
 };
 
 // Declared in `errors.ts`, which is where the robots gate can also reach it,
@@ -613,6 +619,7 @@ export class Governor {
         },
         timeoutMs: this.#config.http.requestTimeoutMs,
         maxBytes: request.maxBytes ?? this.#config.http.maxResponseBytes,
+        body: request.body,
       });
     } catch (error) {
       failure = error;

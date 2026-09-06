@@ -10,15 +10,15 @@ Runs entirely on the owner's infrastructure at $0/month recurring, against publi
 - `CLAUDE.md` - the working agreement, and how work reaches this repo through the SDD umbrella.
 - `docs/decisions/` - one file per significant decision. `docs/fixtures-notes/` - what broke, what the recapture was, so the next repair is shorter.
 
-Status: phase `HISTORY-1`. Nothing fetches anything yet, on purpose: this phase
-is the smallest thing that makes collecting prices SAFE, not the smallest thing
-that collects. A green suite here says the extractor is not obviously wrong
-about markup somebody already saved, and that a restore has actually been
-performed.
+Status: phase `ALERT-4`. The loop is closed end to end: one sanctioned source
+collects prices under its own published terms, history accrues, a rule over that
+history decides a price is worth interrupting somebody for, and a notification
+says why. Nothing is delivered until the owner configures a channel, which is
+the fail-closed default and not an oversight.
 
 ## What exists
 
-TypeScript on Node, PostgreSQL, Drizzle. Four packages behind
+TypeScript on Node, PostgreSQL, Drizzle. Six packages behind
 `"workspaces": ["packages/*"]`:
 
 - `packages/shared` - the cross-package types (`ExtractionResult`,
@@ -51,6 +51,13 @@ TypeScript on Node, PostgreSQL, Drizzle. Four packages behind
   the raw-content retention job, and the attribution a display or export path
   must carry. Every adapter takes a `Governor` and reaches the network only
   through it.
+- `packages/alerts` - the rules over stored history, the notification each
+  firing composes, the durable per listing-and-rule cooldown that keeps them
+  rare, and the one operator-configured delivery channel. A rule is a pure
+  decision over an observation, a history window and its own configuration: no
+  clock, no randomness, no database, no environment. It depends on the db
+  package and the governor, and on nothing that knows which retailer a price
+  came from.
 
 ## The first real source, and the terms it runs under
 
@@ -95,6 +102,46 @@ pnpm sources:start-check   # checks config/sources.json against each source's
 Nothing in this repository makes a live request to that vendor - not a test, not
 CI, not a development session. Every criterion is graded against saved payloads
 in `test/fixtures/bestbuy/` and a stubbed transport.
+
+## The alerts, and the two things this repository refuses to decide
+
+An alert is the whole point of keeping the history, and a stream of them is what
+kills tools like this one. So rarity is built in rather than tuned in later: a
+rule is not evaluated against a listing that holds fewer observations than its
+own configured minimum, and a rule that has fired for a listing stays quiet for
+its configured cooldown, durably, so a container that restarts does not re-send
+this morning's news every hour.
+
+Every notification carries the rule that fired, the observed price with its
+ISO 4217 currency, the reference price it beat with its currency, and a link to
+the listing. The link is the OWNER'S, taken from the watchlist entry: nothing
+here can derive a page a human opens, and a listing with no link is reported by
+name rather than alerted on with a fabricated one.
+
+Two things are deliberately not decided here, and `docs/decisions/0004-...` says
+why at length:
+
+- **which channel.** `config/alerts.json` carries an endpoint, a method, static
+  headers, optional headers for the title and the link, and a credential read
+  from a named environment variable. The committed file carries no endpoint, so
+  nothing is delivered until the owner sets one. Delivery goes out through
+  `Governor.request` like everything else, which means the notification host
+  needs its own ceiling in `config/governor.json` or the first gate refuses it.
+- **which price endings mean clearance.** The community ladder is unreliable by
+  `BRIEF.md`'s own account, so the endings are an operator list, empty as
+  committed, and a match is a corroborating tag on a notification some rule
+  already fired. It cannot trigger one, and there is no code path by which it
+  could.
+
+```sh
+pnpm alerts:start-check   # every rule with its window, minimum and cooldown,
+                          # and whether a channel is configured at all. Reads
+                          # two committed files and contacts nothing
+```
+
+The numbers in `config/alerts.json` are conservative and UNVALIDATED, and the
+file says so: thresholds, windows and cooldowns are outputs of living with the
+system, and `BRIEF.md` fixes none of them.
 
 ## The governor, and why it exists before the second source does
 
@@ -174,6 +221,11 @@ compares every observation row for row.
 `test/integration/governor-allowance-restart.test.ts` is the same idea for the
 allowance counter: it spends part of a period through one governor, throws that
 process away, and asserts the next one continues the count.
+`test/integration/alert-cooldown-restart.test.ts` is the same idea again for the
+alert cooldown, and `test/integration/alert-run.test.ts` reads the whole
+observation table before and after an evaluation run and compares it column for
+column, because the run that reads the history is the one place worth proving
+does not write to it.
 
 The whole suite reaches nothing outside the loopback interface. Every robots,
 back-pressure and breaker case runs against a stub HTTP server this suite starts

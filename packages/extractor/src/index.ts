@@ -18,7 +18,12 @@ import { findOfferCandidates } from "./offers.ts";
 import type { OfferCandidate } from "./offers.ts";
 import { normaliseCurrency, toMinorUnits } from "./currency.ts";
 
-export { minorUnitExponent, normaliseCurrency, toMinorUnits } from "./currency.ts";
+export {
+  formatMinorUnits,
+  minorUnitExponent,
+  normaliseCurrency,
+  toMinorUnits,
+} from "./currency.ts";
 export type { OfferCandidate } from "./offers.ts";
 
 /**

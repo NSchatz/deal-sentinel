@@ -25,7 +25,13 @@
  * told by the last line of the system, and it is the line people read.
  */
 
-import { minorUnitExponent } from "@deal-sentinel/extractor";
+import { formatMinorUnits } from "@deal-sentinel/extractor";
+
+// Re-exported so this package's public surface is unchanged. The function
+// itself lives beside `toMinorUnits`, whose inverse it is: both readings of a
+// price are then decided by one exponent table, and a second caller that prints
+// money (the alert channel) cannot pick up a different idea of a minor unit.
+export { formatMinorUnits };
 
 import { UnattributedEmissionError } from "./errors.ts";
 import type { SourceRegistry } from "./registry.ts";
@@ -167,24 +173,3 @@ function renderListingLine(item: ExportItem): string {
   );
 }
 
-/**
- * An exact integer in a currency's minor unit, printed as that currency's
- * decimal. Built from the digits: 1299 USD is "USD 12.99", 1299 JPY is
- * "JPY 1299" because the yen has no subdivision, and 12995 KWD is "KWD 12.995".
- */
-export function formatMinorUnits(amount: bigint, currency: string): string {
-  const code = currency.trim().toUpperCase();
-  const exponent = minorUnitExponent(code);
-  if (exponent === null) {
-    // Unreachable through the registry, which refuses an unresolvable code
-    // before a source runs. Printed as minor units rather than guessed at.
-    return `${code} ${amount.toString()} (minor units)`;
-  }
-  if (exponent === 0) return `${code} ${amount.toString()}`;
-
-  const negative = amount < 0n;
-  const digits = (negative ? -amount : amount).toString().padStart(exponent + 1, "0");
-  const whole = digits.slice(0, digits.length - exponent);
-  const fraction = digits.slice(digits.length - exponent);
-  return `${code} ${negative ? "-" : ""}${whole}.${fraction}`;
-}

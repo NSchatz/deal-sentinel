@@ -37,6 +37,7 @@ export type { InitializationMarker } from "./start-check.ts";
 
 export {
   RAW_CONTEXT_MAX_CHARS,
+  alertCooldowns,
   governorAllowanceUsage,
   historyInitialization,
   priceObservations,
@@ -44,6 +45,7 @@ export {
   watchlistEntries,
 } from "./schema.ts";
 export type {
+  AlertCooldownRow,
   GovernorAllowanceUsageRow,
   InitializationMarkerRow,
   NewPriceObservationRow,
@@ -63,11 +65,27 @@ export type {
 
 export {
   addWatchlistEntry,
+  drizzleAlertListings,
   drizzleWatchlist,
+  memoryAlertListings,
   memoryWatchlist,
   setWatchlistEntryEnabled,
 } from "./watchlist.ts";
-export type { WatchlistEntry, WatchlistStore } from "./watchlist.ts";
+export type {
+  AlertListing,
+  AlertListingStore,
+  WatchlistEntry,
+  WatchlistStore,
+} from "./watchlist.ts";
+
+export {
+  drizzleObservationHistory,
+  memoryObservationHistory,
+} from "./observations.ts";
+export type { ObservationHistoryStore, ObservationPoint } from "./observations.ts";
+
+export { drizzleAlertCooldowns, memoryAlertCooldowns } from "./alert-state.ts";
+export type { AlertCooldown, AlertCooldownStore } from "./alert-state.ts";
 
 export { sweepExpiredRawContent } from "./retention.ts";
 export type { RetentionSweep } from "./retention.ts";

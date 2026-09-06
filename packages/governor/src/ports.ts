@@ -71,6 +71,15 @@ export type TransportRequest = {
    * bounded at the socket rather than after it is already in memory.
    */
   maxBytes: number;
+  /**
+   * The REQUEST body, for the methods that carry one. Absent on every read this
+   * system makes: a price is fetched with a GET and a robots.txt is one too.
+   * A notification channel is the first caller that has something to say rather
+   * than something to ask, and it says it here - through the same six gates,
+   * because a channel that opened its own socket to carry a body would be the
+   * second way out of this process.
+   */
+  body?: string;
 };
 
 export type TransportResponse = {

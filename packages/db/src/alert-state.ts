@@ -1,0 +1,114 @@
+/**
+ * The durable record of when a rule last fired for a listing.
+ *
+ * This is the only state an evaluation run writes, and it exists because
+ * suppression that dies with the process is not suppression. BRIEF.md section 7
+ * and CLAUDE.md rule 6 both name over-alerting as the failure mode that kills
+ * these tools; a container that restarts hourly and re-sends every alert it has
+ * ever sent is that failure mode with extra steps.
+ *
+ * ONE ROW PER (SOURCE, LISTING, RULE), upserted. The cooldown is a statement
+ * about the LAST time this rule fired for this listing, so a second firing
+ * moves the instant rather than adding a row: nothing here is an audit log, and
+ * a table that grew one row per alert would need a retention policy of its own
+ * for no gain.
+ *
+ * Written ONLY after a delivery succeeded. A cooldown recorded for a
+ * notification that never arrived is an alert the owner never got and will not
+ * get again until the cooldown expires, which is the worst of both directions.
+ */
+
+import { and, eq } from "drizzle-orm";
+
+import type { HistoryDatabase } from "./connection.ts";
+import { alertCooldowns } from "./schema.ts";
+
+/** When a rule last fired for a listing, and on what price. */
+export type AlertCooldown = {
+  sourceId: string;
+  listingId: string;
+  ruleId: string;
+  firedAt: Date;
+  amountMinorUnits: bigint;
+  currency: string;
+};
+
+/** What the run records, and what it reads back after a restart. */
+export type AlertCooldownStore = {
+  /** The last firing of this rule for this listing, or null for none. */
+  read(sourceId: string, listingId: string, ruleId: string): Promise<AlertCooldown | null>;
+  /** Record a DELIVERED notification. Upserts; the latest firing wins. */
+  record(cooldown: AlertCooldown): Promise<void>;
+};
+
+export function drizzleAlertCooldowns(database: HistoryDatabase): AlertCooldownStore {
+  return {
+    async read(sourceId, listingId, ruleId) {
+      const rows = await database
+        .select()
+        .from(alertCooldowns)
+        .where(
+          and(
+            eq(alertCooldowns.sourceId, sourceId),
+            eq(alertCooldowns.listingId, listingId),
+            eq(alertCooldowns.ruleId, ruleId),
+          ),
+        )
+        .limit(1);
+      return rows[0] ?? null;
+    },
+
+    async record(cooldown) {
+      await database
+        .insert(alertCooldowns)
+        .values(cooldown)
+        .onConflictDoUpdate({
+          target: [
+            alertCooldowns.sourceId,
+            alertCooldowns.listingId,
+            alertCooldowns.ruleId,
+          ],
+          set: {
+            firedAt: cooldown.firedAt,
+            amountMinorUnits: cooldown.amountMinorUnits,
+            currency: cooldown.currency,
+          },
+        });
+    },
+  };
+}
+
+/**
+ * The same store in memory, keyed the same way, for a caller with no database.
+ * It suppresses by the same rule, so a test against it is testing the run.
+ */
+export function memoryAlertCooldowns(
+  seed: readonly AlertCooldown[] = [],
+): AlertCooldownStore {
+  // U+0000 separates the three ids because it cannot occur inside any of them,
+  // so no two different triples can collide on one key. WRITTEN AS AN ESCAPE
+  // AND NEVER AS A RAW CONTROL BYTE: a literal NUL in the source makes git
+  // classify this whole file as binary, and a store nobody can read in a diff
+  // is a store nobody reviews.
+  const key = (sourceId: string, listingId: string, ruleId: string): string =>
+    `${sourceId}\u0000${listingId}\u0000${ruleId}`;
+  const held = new Map<string, AlertCooldown>(
+    seed.map((cooldown) => [
+      key(cooldown.sourceId, cooldown.listingId, cooldown.ruleId),
+      { ...cooldown },
+    ]),
+  );
+
+  return {
+    read(sourceId, listingId, ruleId) {
+      return Promise.resolve(held.get(key(sourceId, listingId, ruleId)) ?? null);
+    },
+    record(cooldown) {
+      held.set(
+        key(cooldown.sourceId, cooldown.listingId, cooldown.ruleId),
+        { ...cooldown },
+      );
+      return Promise.resolve();
+    },
+  };
+}

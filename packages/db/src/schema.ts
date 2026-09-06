@@ -1,7 +1,7 @@
 /**
  * The price history schema.
  *
- * Five tables, and all of them are load-bearing:
+ * Six tables, and all of them are load-bearing:
  *
  *   `price_observations`       one row per listing per run, kept indefinitely.
  *                              History accrues at one observation per listing
@@ -30,6 +30,12 @@
  *                              Durable for the same reason the allowance
  *                              counter is: a restart inside the period must not
  *                              be how a stopped source starts asking again.
+ *   `alert_cooldowns`          when a rule last fired for a listing, so it does
+ *                              not fire again inside its own cooldown. Durable
+ *                              because a restart is otherwise how one alert
+ *                              becomes an alert every time the container comes
+ *                              back, which is the failure mode that kills tools
+ *                              like this one.
  */
 
 import {
@@ -272,6 +278,18 @@ export const watchlistEntries = pgTable(
      */
     listingId: text("listing_id").notNull(),
 
+    /**
+     * The link the OWNER supplied for this listing: the page they would open to
+     * buy it. Nullable, and the nullability is the honest shape - an entry added
+     * before this column existed carries no link, and there is no way to derive
+     * one. Nothing in this system fabricates it, and the adapter's own product
+     * URL is not a candidate: that is an API endpoint carrying a credential in
+     * its query string, and an alert is the one place that must never reach.
+     * An alert for a listing with no link is NOT SENT; the listing is reported
+     * by name instead.
+     */
+    listingUrl: text("listing_url"),
+
     /** False means a run attempts nothing for this entry, and issues nothing. */
     enabled: boolean("enabled").notNull().default(true),
 
@@ -339,6 +357,54 @@ export const sourcePeriodStops = pgTable(
   ],
 );
 
+/**
+ * When a rule last fired for a listing, so that it does not fire again inside
+ * its own cooldown.
+ *
+ * DURABLE, and that is the whole point of it being a table. BRIEF.md section 7
+ * names over-alerting as "the failure mode that kills these tools", and an
+ * in-memory suppression is no suppression at all: a container that restarts
+ * every few minutes would send the same alert every few minutes, which is
+ * precisely the moment the owner stops reading them. `source_period_stops`
+ * carries its once-only `notified_at` for the same reason.
+ *
+ * Keyed by (source, listing, rule) - the same per-listing natural key
+ * `watchlist_entries` uses, plus the rule. A listing id means nothing without
+ * its source, and two rules over one listing are two independent cooldowns.
+ *
+ * `fired_at` is the instant of the notification this system DELIVERED. A
+ * delivery that failed writes nothing here, so a failed alert is retried on the
+ * next run rather than being silently suppressed for a week.
+ */
+export const alertCooldowns = pgTable(
+  "alert_cooldowns",
+  {
+    /** The source the listing belongs to, e.g. "bestbuy-api". */
+    sourceId: text("source_id").notNull(),
+    /** The listing, as the same natural key an observation is attributed by. */
+    listingId: text("listing_id").notNull(),
+    /** The rule that fired, as `config/alerts.json` names it. */
+    ruleId: text("rule_id").notNull(),
+    /** When the notification this row suppresses was delivered. */
+    firedAt: timestamp("fired_at", { withTimezone: true, mode: "date" }).notNull(),
+    /**
+     * The observed price that fired it, in exact minor units, and its currency.
+     * Carried so an operator can see WHY a listing is quiet without joining
+     * back to the history. Never a credential and never a URL: an alert record
+     * is a place a pasted endpoint would otherwise come to rest.
+     */
+    amountMinorUnits: bigint("amount_minor_units", { mode: "bigint" }).notNull(),
+    currency: varchar("currency", { length: 3 }).notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: "alert_cooldowns_pkey",
+      columns: [table.sourceId, table.listingId, table.ruleId],
+    }),
+    check("alert_cooldowns_currency_is_iso_4217", sql`${table.currency} ~ '^[A-Z]{3}$'`),
+  ],
+);
+
 export type PriceObservationRow = typeof priceObservations.$inferSelect;
 export type NewPriceObservationRow = typeof priceObservations.$inferInsert;
 export type InitializationMarkerRow = typeof historyInitialization.$inferSelect;
@@ -346,3 +412,4 @@ export type GovernorAllowanceUsageRow = typeof governorAllowanceUsage.$inferSele
 export type WatchlistEntryRow = typeof watchlistEntries.$inferSelect;
 export type NewWatchlistEntryRow = typeof watchlistEntries.$inferInsert;
 export type SourcePeriodStopRow = typeof sourcePeriodStops.$inferSelect;
+export type AlertCooldownRow = typeof alertCooldowns.$inferSelect;

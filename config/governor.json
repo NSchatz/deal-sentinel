@@ -116,7 +116,15 @@
       "packages/sources refuses to run a source whose allowance here exceeds",
       "what its vendor published.",
       "jsonld-generic stays unmetered: no adapter exists for it, so nothing",
-      "counts against it yet."
+      "counts against it yet.",
+      "alert-channel is not a retailer: it is the notification channel, which",
+      "SENDS rather than asks and goes out through this same governor because a",
+      "delivery loop against a notification host is the same runaway client a",
+      "scrape loop is. Unmetered because no notification server publishes a",
+      "daily limit to meter against, and because the number of alerts a day is",
+      "already bounded by the cooldowns in config/alerts.json. It has no host",
+      "ceiling here on purpose: nothing is delivered until the owner configures",
+      "an endpoint, and adding that host's ceiling is part of doing so."
     ],
     "bestbuy-api": {
       "allowance": {
@@ -125,6 +133,7 @@
         "warnFraction": 0.8
       }
     },
-    "jsonld-generic": {}
+    "jsonld-generic": {},
+    "alert-channel": {}
   }
 }
