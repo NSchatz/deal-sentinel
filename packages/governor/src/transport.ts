@@ -34,6 +34,9 @@ export function createFetchTransport(): HttpTransport {
         const response = await fetch(request.url, {
           method: request.method,
           headers: request.headers,
+          // Absent on every read; a notification channel is the one caller that
+          // has a body to send, and it arrives here having passed all six gates.
+          body: request.body,
           redirect: "follow",
           signal: controller.signal,
         });

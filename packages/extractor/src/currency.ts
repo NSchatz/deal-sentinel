@@ -194,6 +194,34 @@ export function minorUnitExponent(code: string): number | null {
   return exponent === undefined ? null : exponent;
 }
 
+/**
+ * An exact integer in a currency's minor unit, printed as that currency's
+ * decimal. Built from the digits: 1299 USD is "USD 12.99", 1299 JPY is
+ * "JPY 1299" because the yen has no subdivision, and 12995 KWD is "KWD 12.995".
+ *
+ * The inverse of `toMinorUnits`, and it lives beside it for that reason: both
+ * readings of a price are decided by the same exponent table, so a caller that
+ * prints money cannot pick up a different idea of what a minor unit is. It
+ * touches no float at any point - the digits are sliced, never divided.
+ */
+export function formatMinorUnits(amount: bigint, currency: string): string {
+  const code = currency.trim().toUpperCase();
+  const exponent = minorUnitExponent(code);
+  if (exponent === null) {
+    // Unreachable through any configured path: the registry and the alert
+    // configuration both refuse an unresolvable code before anything runs.
+    // Printed as minor units rather than guessed at.
+    return `${code} ${amount.toString()} (minor units)`;
+  }
+  if (exponent === 0) return `${code} ${amount.toString()}`;
+
+  const negative = amount < 0n;
+  const digits = (negative ? -amount : amount).toString().padStart(exponent + 1, "0");
+  const whole = digits.slice(0, digits.length - exponent);
+  const fraction = digits.slice(digits.length - exponent);
+  return `${code} ${negative ? "-" : ""}${whole}.${fraction}`;
+}
+
 /** Normalise a currency code, or null when it is not one this repo resolves. */
 export function normaliseCurrency(code: string): string | null {
   const normalised = code.trim().toUpperCase();

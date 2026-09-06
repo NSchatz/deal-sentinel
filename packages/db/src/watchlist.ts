@@ -31,6 +31,29 @@ export type WatchlistStore = {
   enabledFor(sourceId: string): Promise<WatchlistEntry[]>;
 };
 
+/**
+ * One listing an evaluation run may alert about, WITH the owner's link.
+ *
+ * A second, wider entry type rather than a wider `WatchlistEntry`, because the
+ * two readers want different things and neither should carry the other's. A
+ * collection run must not see a URL: it fetches by the source's own listing key
+ * through an adapter that builds its own URL, and handing it a second one would
+ * be handing it somewhere else to go. An alert run must see it: a notification
+ * with no link the owner can open is not sent at all.
+ */
+export type AlertListing = {
+  sourceId: string;
+  listingId: string;
+  /** The owner's link, or null. Null is not a defect; it is an alert not sent. */
+  listingUrl: string | null;
+};
+
+/** The narrow port an evaluation run reads its listings through. */
+export type AlertListingStore = {
+  /** Every ENABLED entry for this source, in a stable order. */
+  enabledFor(sourceId: string): Promise<AlertListing[]>;
+};
+
 /** Wrap a Drizzle database as the watchlist a run reads. */
 export function drizzleWatchlist(database: HistoryDatabase): WatchlistStore {
   return {
@@ -66,6 +89,41 @@ export function memoryWatchlist(entries: readonly WatchlistEntry[]): WatchlistSt
   };
 }
 
+/** Wrap a Drizzle database as the listings an evaluation run alerts about. */
+export function drizzleAlertListings(database: HistoryDatabase): AlertListingStore {
+  return {
+    async enabledFor(sourceId) {
+      const rows = await database
+        .select({
+          sourceId: watchlistEntries.sourceId,
+          listingId: watchlistEntries.listingId,
+          listingUrl: watchlistEntries.listingUrl,
+        })
+        .from(watchlistEntries)
+        .where(
+          and(
+            eq(watchlistEntries.sourceId, sourceId),
+            eq(watchlistEntries.enabled, true),
+          ),
+        )
+        .orderBy(asc(watchlistEntries.id));
+      return rows;
+    },
+  };
+}
+
+/** The same read in memory, for a caller with no database. */
+export function memoryAlertListings(
+  entries: readonly AlertListing[],
+): AlertListingStore {
+  const held = entries.map((entry) => ({ ...entry }));
+  return {
+    enabledFor(sourceId) {
+      return Promise.resolve(held.filter((entry) => entry.sourceId === sourceId));
+    },
+  };
+}
+
 /**
  * Put a listing on the watchlist, or update the entry that is already there.
  *
@@ -85,6 +143,11 @@ export async function addWatchlistEntry(
       set: {
         enabled: entry.enabled ?? true,
         note: entry.note ?? null,
+        // The owner correcting a link is the ordinary reason to add an entry
+        // twice, so the upsert has to carry it. Absent means absent: an entry
+        // re-added without a link no longer has one, and the alert path then
+        // refuses to send for it rather than using a link nobody restated.
+        listingUrl: entry.listingUrl ?? null,
       },
     })
     .returning();

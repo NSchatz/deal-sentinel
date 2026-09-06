@@ -1,0 +1,118 @@
+{
+  "_comment": [
+    "THE NUMBERS IN THIS FILE ARE CONSERVATIVE AND UNVALIDATED.",
+    "BRIEF.md deliberately fixes no threshold, no window and no cooldown, and",
+    "CLAUDE.md rule 8 forbids inventing one and then treating it as decided.",
+    "Every value here exists so that a threshold EXISTS and is enforced; none",
+    "of them has been checked against a real listing's price series, because at",
+    "this phase this repository has never watched one for ninety days. They are",
+    "outputs of living with the system: change them deliberately, in a commit",
+    "that says why, and expect the first change to be the one that comes after",
+    "the first alert that was not worth having.",
+    "Keys beginning with an underscore are comments and are ignored by the",
+    "loader. Every other key is required: nothing here has a built-in default",
+    "and the process refuses to start on a file that is missing one."
+  ],
+
+  "sourceId": "alert-channel",
+  "_sourceId": [
+    "The source id the delivery channel spends against in config/governor.json.",
+    "The governor's second gate refuses a source it has never heard of, so this",
+    "name must appear under 'sources' there. It is NOT a retailer: nothing is",
+    "collected under it, and it exists so that notification traffic is counted,",
+    "paused and ceilinged like every other request this system makes."
+  ],
+
+  "rules": {
+    "_comment": [
+      "One entry per rule instance. `window-low` is the only kind this build",
+      "implements: is this observation the lowest price inside its window, by at",
+      "least a margin? The roadmap phase orders it first because it is",
+      "deterministic against stored numbers; the tuned rules (a percentage drop",
+      "against a rolling reference, seasonal buying windows, per-category",
+      "thresholds) are a later phase and are not configurable here yet.",
+      "windowMs               how far back the comparison looks, from the",
+      "                       observation's own instant.",
+      "minimumObservations    how many observations must be inside that window",
+      "                       before the rule is evaluated at all. This is the",
+      "                       number that stops a listing added yesterday",
+      "                       declaring an all-time low today.",
+      "improvementMinorUnits  how much lower than the window's low the",
+      "                       observation must be, in the currency's own minor",
+      "                       units. Integer, because a percentage of an exact",
+      "                       integer is where the first float on this path",
+      "                       would come from. 100 is one dollar in USD; it is",
+      "                       one hundred yen in JPY, so a household watching",
+      "                       more than one currency wants a rule per currency.",
+      "cooldownMs             how long this rule stays quiet for a listing",
+      "                       after it has fired for it."
+    ],
+
+    "window-low-90d": {
+      "_comment": [
+        "Ninety days is the shortest of the windows BRIEF.md section 4",
+        "mentions ('all-time/365-day/90-day lows'), so it is the one that can",
+        "say anything at all in this system's first season. Twelve observations",
+        "in ninety days is a listing that has been watched for a while and not",
+        "one added last week. One currency unit of improvement stops a one-cent",
+        "wobble around a stable price from being an alert."
+      ],
+      "kind": "window-low",
+      "windowMs": 7776000000,
+      "minimumObservations": 12,
+      "improvementMinorUnits": 100,
+      "cooldownMs": 604800000
+    }
+  },
+
+  "clearanceEndings": {
+    "_comment": [
+      "EMPTY ON PURPOSE, and this system asserts no pattern for any retailer.",
+      "BRIEF.md section 4: a retailer's clearance price-ending ladder 'is",
+      "community lore that is widely reported unreliable in 2026, so endings",
+      "should only ever be a weak corroborating tag, never a trigger on their",
+      "own'. Writing one in here would be stating a fact this project does not",
+      "have. An owner who trusts an ending adds it themselves, per source, as",
+      "digits matched against the end of the exact minor-unit amount:",
+      "  \"bestbuy-api\": [\"97\", \"96\"]",
+      "and it will still never trigger an alert on its own - it is attached to",
+      "a notification some rule already fired."
+    ]
+  },
+
+  "channel": {
+    "_comment": [
+      "NO ENDPOINT IS CONFIGURED, so this system delivers nothing. That is the",
+      "fail-closed default and not an oversight: BRIEF.md section 9 leaves the",
+      "notification channel open, so choosing one is the owner's act and not",
+      "this repository's.",
+      "To turn alerts on: set endpoint to the absolute URL the channel",
+      "publishes to, add that host to 'hosts' in config/governor.json (a host",
+      "with no ceiling is refused by the governor's first gate), and run",
+      "`pnpm run alerts:start-check`, which checks exactly that before anything",
+      "is sent.",
+      "The alert body is the request body; titleHeader and linkHeader name the",
+      "headers a one-line title and the listing link travel in, where the",
+      "channel has them, and are null where it does not. The credential is",
+      "read from an environment VARIABLE - never from this file - in the same",
+      "pattern config/sources.json uses, and travels in the header named here.",
+      "A worked example, for a self-hosted ntfy server (whose publish",
+      "documentation the spec for this phase carries as reference material, and",
+      "which is reference material and not a requirement):",
+      "  \"endpoint\": \"https://ntfy.example.lan/deals\",",
+      "  \"method\": \"POST\",",
+      "  \"titleHeader\": \"X-Title\",",
+      "  \"linkHeader\": \"X-Click\",",
+      "  \"credential\": { \"variable\": \"DEAL_SENTINEL_ALERT_TOKEN\",",
+      "                   \"header\": \"Authorization\", \"prefix\": \"Bearer \" }",
+      "Anything that accepts a plain-text body over http works the same way;",
+      "nothing in this system is specific to one vendor."
+    ],
+    "endpoint": null,
+    "method": "POST",
+    "headers": {},
+    "titleHeader": null,
+    "linkHeader": null,
+    "credential": null
+  }
+}

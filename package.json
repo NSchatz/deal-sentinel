@@ -17,6 +17,7 @@
     "test:integration": "node --test --test-concurrency=1 \"test/integration/*.test.ts\"",
     "governor:start-check": "node packages/governor/src/cli/start-check.ts",
     "sources:start-check": "node packages/sources/src/cli/start-check.ts",
+    "alerts:start-check": "node packages/alerts/src/cli/start-check.ts",
     "db:generate": "pnpm --dir packages/db exec drizzle-kit generate",
     "db:init": "node packages/db/src/cli/init.ts",
     "db:start-check": "node packages/db/src/cli/start-check.ts",
@@ -24,6 +25,7 @@
     "db:restore": "bash packages/db/scripts/restore.sh"
   },
   "devDependencies": {
+    "@deal-sentinel/alerts": "*",
     "@deal-sentinel/db": "*",
     "@deal-sentinel/extractor": "*",
     "@deal-sentinel/governor": "*",

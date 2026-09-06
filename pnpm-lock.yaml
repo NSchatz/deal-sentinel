@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@deal-sentinel/alerts':
+        specifier: '*'
+        version: link:packages/alerts
       '@deal-sentinel/db':
         specifier: '*'
         version: link:packages/db
@@ -38,6 +41,18 @@ importers:
       typescript:
         specifier: 5.7.2
         version: 5.7.2
+
+  packages/alerts:
+    dependencies:
+      '@deal-sentinel/db':
+        specifier: '*'
+        version: link:../db
+      '@deal-sentinel/extractor':
+        specifier: '*'
+        version: link:../extractor
+      '@deal-sentinel/governor':
+        specifier: '*'
+        version: link:../governor
 
   packages/db:
     dependencies:
