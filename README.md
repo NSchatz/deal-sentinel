@@ -93,6 +93,17 @@ failure is swallowed, and nothing the sink returns is read. A lost telemetry row
 is a gap in a chart; a retry earned by a lost telemetry row is traffic no re-run
 undoes.
 
+**The rates are over what LEFT the process.** Success, error and block rates are
+computed over `success + error + blocked` - the records the far side actually
+answered - and the denominator is printed on the page beside them. `refused`
+means the governor declined to send, so the far side answered nothing, and
+putting refusals under the line would make every rate smaller the more careful
+this system got: a hundred refusals beside one block would read as "1.0%
+blocked" for a source that was blocked on everything it sent. The block rate is
+what the politeness ceilings are tuned against, so it is the number over what was
+sent. All four counts are still on the page, refusals included, and a period in
+which nothing left the process reports NO rate rather than zeros.
+
 **What the page shows, and what it refuses to say.** A source whose most recent
 successful fetch is older than the configured staleness horizon reads BROKEN and
 not quiet. A source with no record at all inside the period on screen reads NO
@@ -117,10 +128,15 @@ NOT SHOWN.
 `config/dashboard.json` carries the bind address, the port, the staleness
 horizon, the rate period, the default chart range and how many recent conditions
 a source lists. Nothing here has a built-in default. The committed file names
-`127.0.0.1`; the loader refuses `0.0.0.0` and `::` outright, because a wildcard
-is not an address the configuration names but every address the machine has.
-There is no authentication, no TLS and no accounts, so a non-loopback address is
-a deliberate choice and the start check says so out loud.
+`127.0.0.1`. The loader requires that value to be a literal IP address and
+refuses the unspecified address in either family, decided from the address's
+BYTES rather than from its text: `0.0.0.0`, `::`, `::0`, `::ffff:0.0.0.0`,
+`0000:0000:0000:0000:0000:0000:0000:0000` and `0` are one address written six
+ways, this runtime binds all six to every interface, and a list of spellings
+closes only the ones somebody thought of. A name is refused too - a resolver
+answers at listen time, and what it answers is not what the file said. There is
+no authentication, no TLS and no accounts, so a non-loopback address is a
+deliberate choice and the start check says so out loud.
 
 ```
 pnpm run dashboard:start-check   # what the committed configuration permits

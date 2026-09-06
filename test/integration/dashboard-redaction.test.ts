@@ -156,11 +156,25 @@ async function open(path: string): Promise<Page> {
   return await openPage(browser, dashboard.server.origin, path);
 }
 
+/**
+ * A listing identifier that carries a credential, handed to the page in the
+ * query string.
+ *
+ * Nothing in this system puts one there today. That is a fact about today's
+ * callers, and the display path is where a leak is caught rather than where it
+ * is assumed not to have happened: the listing view echoes both identifiers back
+ * into five different answers, and an operator pasting a URL out of a log is one
+ * of the shapes this whole phase exists to survive.
+ */
+const REFLECTED_LISTING = `8880044&apiKey=${TEST_CREDENTIAL}`;
+
 /** Every view this dashboard serves that can carry a recorded string. */
 const VIEWS = [
   "/",
   `/listing?source=${SOURCE}&listing=8880044`,
   `/listing?source=${SOURCE}&listing=not-a-listing`,
+  `/listing?source=${SOURCE}&listing=${encodeURIComponent(REFLECTED_LISTING)}`,
+  `/listing?source=${encodeURIComponent(REFLECTED_LISTING)}&listing=8880044`,
 ];
 
 function assertNoCredential(text: string, where: string): void {
@@ -215,6 +229,59 @@ describe("criterion 22: no rendered text on any view carries a credential", () =
     } finally {
       await page.close();
     }
+  });
+
+  it("redacts a credential REFLECTED out of the query string too", async () => {
+    // The listing view is the one page that echoes its input. `escape()` makes
+    // a credential safe to put in a document; it does not make it safe to show.
+    delete process.env[TEST_CREDENTIAL_VARIABLE];
+    const path =
+      `/listing?source=${SOURCE}&listing=${encodeURIComponent(REFLECTED_LISTING)}`;
+    const page = await open(path);
+    try {
+      const text = await renderedText(page);
+      assertNoCredential(text, path);
+      // Present, not merely absent: the identifier is still shown, with the
+      // parameter's value replaced rather than the whole page suppressed.
+      assert.ok(
+        text.includes(CREDENTIAL_PLACEHOLDER),
+        `the reflected identifier shows no redaction marker: ${text.slice(0, 600)}`,
+      );
+      // And the attributes the graders read carry the redacted value too, so
+      // there is no spelling of it on this page that skipped the redactor.
+      const attribute = await page
+        .locator("[data-listing-id]")
+        .first()
+        .getAttribute("data-listing-id");
+      assert.ok(attribute !== null);
+      assertNoCredential(attribute, `${path} data-listing-id`);
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("WOULD show the reflected one if the listing view did not redact", async () => {
+    // The mutation for the case above, in the shape this file already uses: the
+    // same reflected value through a pass-through redactor puts the credential
+    // into the answer, so the assertion above is catching something.
+    const given = await answer(
+      {
+        config: testDashboardConfig(),
+        governor: bestBuyGovernorConfig(),
+        registry: testRegistry(),
+        database,
+        redactor: { scrub: (text) => text },
+        now: () => NOW,
+      },
+      "GET",
+      `/listing?source=${SOURCE}&listing=${encodeURIComponent(REFLECTED_LISTING)}`,
+    );
+    assert.equal(given.status, 200);
+    assert.ok(
+      given.body.includes(TEST_CREDENTIAL),
+      "the unredacted render did NOT carry the reflected credential, so the " +
+        "redaction is not what is keeping it off the page",
+    );
   });
 
   it("redacts the SECRET ITSELF where this process can see it", async () => {

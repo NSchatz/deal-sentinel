@@ -122,6 +122,7 @@ export {
   maskStringLiterals,
   normaliseComputedAccess,
   serverOnlyImportLines,
+  serverOnlyImportSpans,
   stripComments,
 } from "./no-direct-http.ts";
 export type {
@@ -129,4 +130,5 @@ export type {
   DirectHttpFinding,
   ScanTarget,
   SourceFile,
+  SourceSpan,
 } from "./no-direct-http.ts";

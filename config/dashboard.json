@@ -12,9 +12,13 @@
 
     "bindAddress is LOOPBACK. This is the first listening socket this system",
     "has ever had, and the page behind it renders vendor refusal details that",
-    "are derived from URLs carrying a credential in the query string. The",
-    "loader REFUSES 0.0.0.0 and :: outright - a wildcard is not an address, it",
-    "is every address this machine has. A specific LAN address is permitted if",
+    "are derived from URLs carrying a credential in the query string. This must",
+    "be a literal IP address, and the loader REFUSES the unspecified address in",
+    "either family however it is spelled - it parses the value and looks at its",
+    "bytes, because 0.0.0.0, ::, ::0, ::ffff:0.0.0.0 and 0 are one address",
+    "written five ways and this runtime binds all five to every interface. A",
+    "name is refused as well: a resolver answers at listen time and what it",
+    "answers is not what this file said. A specific LAN address is permitted if",
     "the owner puts one here deliberately; there is no authentication, no TLS",
     "and no accounts, so anything that can reach the socket sees everything.",
 

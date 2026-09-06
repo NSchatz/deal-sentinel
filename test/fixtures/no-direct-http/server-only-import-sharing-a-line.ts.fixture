@@ -1,0 +1,36 @@
+/**
+ * A file that SERVES and also sends, with both imports on one physical line.
+ *
+ * This is the shape a formatter produces, or a careless edit, and it is the
+ * shape a line-scoped exemption cannot see: the server-only import is real, the
+ * client import beside it is real too, and only the second one is a finding. A
+ * whitespace change is not review, so the exemption is scoped to the characters
+ * the server-only import occupies rather than to the line it landed on.
+ *
+ * Three lines, three different neighbours: another client module, a raw socket,
+ * and a server-only import twice over which must stay clean.
+ */
+
+import { createServer } from "node:http"; import { request } from "node:https";
+import { createServer as listen } from "node:http"; import { Socket } from "node:net";
+import { Server } from "node:http"; import type { IncomingMessage } from "node:http";
+
+export function serve(port: number, address: string): Server {
+  const server = createServer((_incoming: IncomingMessage, response) => {
+    response.end("ok");
+  });
+  server.listen(port, address);
+  return server;
+}
+
+export function alsoServe(port: number): Server {
+  return listen(() => undefined).listen(port);
+}
+
+export function send(url: string): void {
+  request(url);
+}
+
+export function connect(port: number): Socket {
+  return new Socket().connect(port);
+}

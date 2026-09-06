@@ -78,11 +78,31 @@ export type OutcomeCounts = {
  * evidence: "50% blocked" is an emergency out of forty requests and a shrug out
  * of two, and an operator deciding whether a politeness ceiling is right needs
  * to know which one they are looking at.
+ *
+ * THE DENOMINATOR IS WHAT LEFT THIS PROCESS, and it is carried here rather than
+ * left to be inferred. `refused` means the governor declined to send: nothing
+ * went to the far side, so the far side neither succeeded, failed nor blocked
+ * it, and counting it under the line makes every rate smaller the more careful
+ * this system is. A source with a hundred refusals and one block reads as "1.0%
+ * blocked" over the total and as "100% blocked" over what was actually sent, and
+ * the second number is the one the phase exists to produce: the roadmap places
+ * it before the first scraped breadth because "block rate is what says whether
+ * the politeness ceilings are right". A ceiling is tuned against the requests it
+ * let through.
+ *
+ * Every raw count stays on the page beside this, refusals included, so the
+ * denominator is legible and the other reading is still available to anybody who
+ * wants it.
  */
 export type OutcomeRates = {
   success: number;
   error: number;
   blocked: number;
+  /**
+   * The records in the period that LEFT this process: success + error +
+   * blocked. Every rate above is over this and over nothing else.
+   */
+  attempted: number;
 };
 
 export type AllowanceView =
@@ -286,18 +306,24 @@ export function decideVerdict(
   };
 }
 
-/** The three rates, over the counts they were computed from. */
-export function ratesFrom(counts: OutcomeCounts): OutcomeRates {
-  if (counts.total === 0) {
-    // Unreachable through `buildSourceHealth`, which passes null instead. Kept
-    // total rather than throwing, because a divide by zero here would be a
-    // rendered NaN, and a NaN on a page reads as a number.
-    return { success: 0, error: 0, blocked: 0 };
-  }
+/**
+ * The three rates over what left this process, or null when nothing did.
+ *
+ * NULL AND NOT ZERO. A period in which every record is a refusal this system
+ * made has no success, error or block rate to report at all: nothing reached the
+ * far side, so the far side answered nothing. Reporting zeros there would say
+ * "we asked and were never blocked", which is the same lie AC4 forbids for a
+ * period with no records - and the counts, refusals included, are reported
+ * either way, so nothing is hidden by declining to divide.
+ */
+export function ratesFrom(counts: OutcomeCounts): OutcomeRates | null {
+  const attempted = counts.success + counts.error + counts.blocked;
+  if (attempted === 0) return null;
   return {
-    success: counts.success / counts.total,
-    error: counts.error / counts.total,
-    blocked: counts.blocked / counts.total,
+    success: counts.success / attempted,
+    error: counts.error / attempted,
+    blocked: counts.blocked / attempted,
+    attempted,
   };
 }
 

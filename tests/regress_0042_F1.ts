@@ -5,38 +5,33 @@
  * address and port its configuration names, and the configuration committed to
  * this repository SHALL name a loopback address."
  *
- * `packages/dashboard/src/config.ts` enforces the first half with a four-entry
- * denylist:
+ * The defect the impl-gate refuter measured: `packages/dashboard/src/config.ts`
+ * enforced the first half with a four-entry denylist of SPELLINGS,
  *
  *     const WILDCARD_ADDRESSES = ["0.0.0.0", "::", "*", ""];
  *
- * and its own header states the rule that list is meant to implement: "a
- * wildcard is not an address the configuration names, it is every address the
- * machine has, including the one the rest of the world can reach."
+ * and this runtime binds at least a dozen other spellings of the same address
+ * to INADDR_ANY / in6addr_any. `::0`, `0000:0000:0000:0000:0000:0000:0000:0000`,
+ * `::ffff:0.0.0.0` and `0` all walked through the loader, and the process then
+ * answered on this container's routable address while its configuration named
+ * one address.
  *
- * The denylist is spelling-based, and it misses at least four other spellings of
- * the same wildcard that Node accepts and binds to INADDR_ANY / in6addr_any:
+ * The file the refuter wrote REPRODUCED that. This one is its regression twin:
+ * every assertion below states the criterion, so it is green while the property
+ * holds and red the moment it stops. Three parts, in the order that makes the
+ * third one mean something:
  *
- *     "::0"                                      -> binds ::
- *     "0000:0000:0000:0000:0000:0000:0000:0000"  -> binds ::
- *     "::ffff:0.0.0.0"                           -> binds the IPv4 wildcard
- *     "0"                                        -> binds 0.0.0.0
+ *   1. the loader refuses every spelling of the unspecified address, including
+ *      spellings assembled here that appear in no list anywhere in the tree;
+ *   2. MUTATION - with the loader bypassed, the shipped server on `::0` DOES
+ *      answer on this machine's routable address, which is what proves the
+ *      probe below can detect the defect at all;
+ *   3. with the loader in place and a loopback address configured, the routable
+ *      address is dead.
  *
- * This test takes one of them, loads it through the shipped loader, starts the
- * shipped server on it, and then reaches the socket over a NON-LOOPBACK address
- * of this machine. A page comes back, which is the criterion failing: the
- * process bound an address the configuration did not name.
- *
- * The exposure is the one the spec's own Blast Radius paragraph calls
- * irreversible - this is the system's first listening socket and its first
- * display path, with no authentication, no TLS and no accounts, rendering vendor
- * refusal details derived from URLs that carry a credential in the query string.
- *
- * No database is needed: the socket answers the "history database unreachable"
- * page, which is enough to prove what it is bound to. The socket is reached
- * through Playwright's request context, the same way
- * `test/integration/dashboard-read-only.test.ts` reaches it, so that this file
- * names no HTTP client and stays clean under the single-chokepoint proof.
+ * The socket is reached through Playwright's request context, the same way
+ * `test/integration/dashboard-read-only.test.ts` reaches it, so this file names
+ * no HTTP client and stays clean under the single-chokepoint proof.
  *
  * Run with:
  *
@@ -50,17 +45,46 @@ import pg from "pg";
 import type { APIRequestContext, Browser } from "playwright";
 
 import { createDatabase } from "@deal-sentinel/db";
-import { startDashboard, validateDashboardConfig } from "@deal-sentinel/dashboard";
+import {
+  DashboardConfigError,
+  startDashboard,
+  validateDashboardConfig,
+} from "@deal-sentinel/dashboard";
+import type { DashboardConfig } from "@deal-sentinel/dashboard";
 
 import { launchBrowser } from "../test/support/dashboard-harness.ts";
 import { bestBuyGovernorConfig, testRegistry } from "../test/support/source-3-harness.ts";
 
-/** Every spelling of "every interface" this machine's runtime actually accepts. */
+/**
+ * The four spellings the refuter measured, plus ten more this runtime binds to
+ * the unspecified address, plus four assembled for this file and measured
+ * against nothing. The last group is the point: a fix that enumerated spellings
+ * would pass on the first fourteen and fail on the last four.
+ */
 const WILDCARD_SPELLINGS = [
+  // Measured by the refuter, in `regress_0042_probe_bind.mjs`.
+  "0.0.0.0",
+  "::",
   "::0",
-  "0000:0000:0000:0000:0000:0000:0000:0000",
-  "::ffff:0.0.0.0",
   "0",
+  "::ffff:0.0.0.0",
+  "0000:0000:0000:0000:0000:0000:0000:0000",
+  // Measured in this loop, in `regress_0042_probe_bind2.mjs`.
+  "00",
+  "0.0",
+  "0.0.0",
+  "0x0",
+  "0x00000000",
+  "0000000000",
+  "000.000.000.000",
+  "0:0:0:0:0:0:0:0",
+  "::0.0.0.0",
+  "::ffff:0:0",
+  // Written here for the first time, measured against no probe at all.
+  "0000:0:0000:0:0000:0:0000:0",
+  "0:0:0:0:0:0:0.0.0.0",
+  "0x0.0x0.0x0.0x0",
+  "000000",
 ];
 
 let browser: Browser;
@@ -76,7 +100,7 @@ after(async () => {
 }, { timeout: 60_000 });
 
 /** A real, non-loopback IPv4 address this machine carries. */
-function nonLoopbackAddress(): string | null {
+function routableAddress(): string | null {
   for (const addresses of Object.values(networkInterfaces())) {
     for (const address of addresses ?? []) {
       if (address.internal) continue;
@@ -97,41 +121,53 @@ function deadPool(): pg.Pool {
   return pool;
 }
 
-function probeConfig(bindAddress: string, port: number) {
+function probeDocument(bindAddress: string, port: number): Record<string, unknown> {
+  return {
+    bindAddress,
+    port,
+    stalenessHorizonMs: 3_600_000,
+    ratePeriodMs: 86_400_000,
+    defaultChartRangeMs: 7_776_000_000,
+    conditionHistoryLimit: 20,
+  };
+}
+
+function probeConfig(bindAddress: string, port: number): DashboardConfig {
   return validateDashboardConfig(
-    {
-      bindAddress,
-      port,
-      stalenessHorizonMs: 3_600_000,
-      ratePeriodMs: 86_400_000,
-      defaultChartRangeMs: 7_776_000_000,
-      conditionHistoryLimit: 20,
-    },
+    probeDocument(bindAddress, port),
     "the F1 probe configuration",
   );
 }
 
-describe("F1 (AC24): the wildcard denylist misses equivalent spellings", () => {
-  it("the loader accepts spellings of the wildcard it means to refuse", () => {
+/** The configuration the loader would refuse, built anyway. This is the mutation. */
+function bypassedConfig(bindAddress: string, port: number): DashboardConfig {
+  return { ...probeConfig("127.0.0.1", port), bindAddress };
+}
+
+describe("F1 (AC24): the unspecified address is refused however it is spelled", () => {
+  it("refuses every spelling of it, including four written here for the first time", () => {
     for (const spelling of WILDCARD_SPELLINGS) {
-      // Documents the gap rather than asserting the criterion: the loader
-      // returns these unchanged where it refuses "0.0.0.0" and "::".
-      assert.equal(probeConfig(spelling, 18_791).bindAddress, spelling);
+      assert.throws(
+        () => probeConfig(spelling, 18_791),
+        (error: unknown) => {
+          assert.ok(error instanceof DashboardConfigError);
+          assert.equal(error.setting, "bindAddress");
+          return true;
+        },
+        `${spelling} was accepted as a bind address, so the process would bind ` +
+          "every interface this machine has while its configuration named one",
+      );
     }
   });
 
-  it("binds every interface, so it binds an address the configuration did not name", async () => {
-    const reachable = nonLoopbackAddress();
-    assert.ok(
-      reachable !== null,
-      "this machine has no non-loopback IPv4 address, so this probe cannot run",
-    );
+  it("MUTATION: with the loader bypassed, `::0` really does answer on the routable address", async () => {
+    // Without this, the assertion after it could pass because the probe cannot
+    // find a socket rather than because there is none to find.
+    const reachable = routableAddress();
+    assert.ok(reachable !== null, "this machine has no non-loopback IPv4 address");
 
     const pool = deadPool();
-    // "::0" is the ordinary IPv6 spelling of the wildcard the loader refuses as
-    // "::". Nothing distinguishes the two but the text.
-    const config = probeConfig("::0", 18_792);
-
+    const config = bypassedConfig("::0", 18_792);
     const server = await startDashboard({
       config,
       governor: bestBuyGovernorConfig(),
@@ -140,15 +176,46 @@ describe("F1 (AC24): the wildcard denylist misses equivalent spellings", () => {
     });
 
     try {
-      const response = await api.get(`http://${reachable}:${config.port}/`, {
+      const answered = await api.get(`http://${reachable}:${config.port}/`, {
         timeout: 10_000,
       });
-      assert.fail(
-        `the dashboard answered on ${reachable}:${config.port} (status ` +
-          `${response.status()}) while its configuration named the single ` +
-          'address "::0". AC24 requires it to bind only the address its ' +
-          "configuration names; it bound every interface this machine has, " +
-          "including one the rest of the network can reach.",
+      // 503: the pool points at nothing, so the page is the "history database
+      // unreachable" one. That it answers AT ALL is the whole point.
+      assert.ok(
+        answered.status() > 0,
+        "a wildcard bind did not answer on the routable address, so the " +
+          "criterion assertion below proves nothing",
+      );
+    } finally {
+      await server.close();
+      await pool.end();
+    }
+  });
+
+  it("binds only the address its configuration names, and the routable one is dead", async () => {
+    const reachable = routableAddress();
+    assert.ok(reachable !== null, "this machine has no non-loopback IPv4 address");
+
+    const pool = deadPool();
+    const config = probeConfig("127.0.0.1", 18_793);
+    const server = await startDashboard({
+      config,
+      governor: bestBuyGovernorConfig(),
+      registry: testRegistry(),
+      database: createDatabase(pool),
+    });
+
+    try {
+      const onItsOwnAddress = await api.get(`http://127.0.0.1:${config.port}/`, {
+        timeout: 10_000,
+      });
+      assert.ok(onItsOwnAddress.status() > 0, "the configured address is dead");
+
+      await assert.rejects(
+        api.get(`http://${reachable}:${config.port}/`, { timeout: 5_000 }),
+        `the dashboard answered on ${reachable}:${config.port} while its ` +
+          'configuration named the single address "127.0.0.1". AC24 requires ' +
+          "it to bind only the address its configuration names.",
       );
     } finally {
       await server.close();

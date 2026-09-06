@@ -31,6 +31,14 @@ export {
 } from "./config.ts";
 export type { DashboardConfig } from "./config.ts";
 
+export {
+  isLoopback,
+  parseIpAddress,
+  stripBrackets,
+  unspecifiedFamily,
+} from "./address.ts";
+export type { IpFamily, ParsedAddress } from "./address.ts";
+
 export { DashboardConfigError } from "./errors.ts";
 
 export { buildListingView, buildOverview, decideVerdict, ratesFrom } from "./view.ts";

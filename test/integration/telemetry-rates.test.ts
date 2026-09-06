@@ -55,7 +55,11 @@ const CONFIG = testDashboardConfig({
   stalenessHorizonMs: STALENESS_HORIZON_MS,
 });
 
-/** Three sources: one busy, one silent this period, one that never worked. */
+/**
+ * Four sources: one busy, one silent this period, one that never worked, and
+ * one every record of which is a refusal this system made - the shape that has
+ * records but nothing under the rates' denominator.
+ */
 const GOVERNOR: GovernorConfig = bestBuyGovernorConfig({
   sources: {
     "bestbuy-api": {
@@ -63,6 +67,7 @@ const GOVERNOR: GovernorConfig = bestBuyGovernorConfig({
     },
     "silent-source": {},
     "never-worked": {},
+    "refused-everything": {},
   },
 });
 
@@ -136,6 +141,17 @@ before(async () => {
       latencyMs: 40,
       occurredAt: at(-HOUR),
     },
+
+    // A source that recorded three REFUSALS in the period and nothing else.
+    // It has data, so it is not criterion 4's no-data case; nothing left the
+    // process, so there is no success, error or block rate over what did.
+    ...Array.from({ length: 3 }, (_unused, index) => ({
+      sourceId: "refused-everything",
+      outcomeClass: "refused" as const,
+      latencyMs: 2,
+      occurredAt: at(-HOUR * (index + 2)),
+      condition: "allowance-exhausted: this system declined to send",
+    })),
   ]);
 
   // "silent-source" needs its one success INSIDE the horizon but its period
@@ -193,21 +209,69 @@ describe("criterion 3: rates over a bounded period, with the counts beside them"
   });
 
   it("computes each rate over exactly those counts", () => {
+    // The denominator is what LEFT THIS PROCESS: 5 + 2 + 2. The one refusal is
+    // a request the governor declined to send, so the far side neither
+    // succeeded, failed nor blocked it, and it is not under the line. See
+    // `OutcomeRates` for the argument and `notes.md` for the reading.
     const source = health("bestbuy-api");
     assert.ok(source.rates !== null);
-    assert.equal(source.rates.success, 0.5);
-    assert.equal(source.rates.error, 0.2);
-    assert.equal(source.rates.blocked, 0.2);
+    assert.equal(source.rates.attempted, 9);
+    assert.equal(source.rates.success, 5 / 9);
+    assert.equal(source.rates.error, 2 / 9);
+    assert.equal(source.rates.blocked, 2 / 9);
+    // The counts are unchanged by that choice: every class is still reported,
+    // refusals included, and they still sum to the total.
+    assert.equal(source.counts?.refused, 1);
+    assert.equal(source.counts?.total, 10);
   });
 
-  it("reports the counts alongside the rates on the page", () => {
+  it("puts the refusals under no rate, which is the number the ceiling is tuned against", () => {
+    // The mutation for the assertion above, stated as arithmetic rather than as
+    // a second implementation: over the TOTAL, the same two blocks would read
+    // 20.0%, and an operator would be looking at a block rate diluted by the
+    // requests this system was careful enough not to send.
+    const source = health("bestbuy-api");
+    assert.ok(source.counts !== null && source.rates !== null);
+    const overTotal = source.counts.blocked / source.counts.total;
+    assert.equal(overTotal, 0.2);
+    assert.notEqual(
+      source.rates.blocked,
+      overTotal,
+      "the block rate is being computed over every record in the period, " +
+        "refusals included, so it shrinks as this system gets more careful",
+    );
+  });
+
+  it("reports the counts alongside the rates on the page, and names the denominator", () => {
     // A rate with no denominator is not evidence: 50% blocked is an emergency
     // out of forty and a shrug out of two.
     const page = renderedOverview();
     assert.match(page, /data-count-success[^>]*>5 success/);
     assert.match(page, /data-count-blocked[^>]*>2 blocked/);
+    assert.match(page, /data-count-refused[^>]*>1 refused/);
     assert.match(page, /data-count-total[^>]*>10</);
-    assert.match(page, /data-rate="blocked">20\.0% blocked/);
+    assert.match(page, /data-rate="blocked">22\.2% blocked/);
+    // The denominator the reader is owed, on the page rather than inferable.
+    assert.match(page, /data-rate-denominator>9</);
+    assert.match(page, /data-rate-excluded>1</);
+    assert.match(page, /request\(s\) that left this process/);
+  });
+
+  it("reports NO rate for a period in which nothing left the process", () => {
+    // Every record a refusal. There is no success, error or block rate to
+    // report: nothing reached the far side, so the far side answered nothing.
+    // Zeros here would say "we asked and were never blocked".
+    const source = health("refused-everything");
+    assert.equal(source.counts?.refused, 3);
+    assert.equal(source.counts?.total, 3);
+    assert.equal(source.rates, null, "a rate was computed from nothing sent");
+
+    const row = rowFor(renderedOverview(), "refused-everything");
+    assert.match(row, /data-no-rates="nothing-sent"/);
+    assert.match(row, /data-count-refused[^>]*>3 refused/);
+    assert.doesNotMatch(row, /0\.0% blocked/);
+    assert.doesNotMatch(row, /0\.0% error/);
+    assert.doesNotMatch(row, /data-rate="blocked"/);
   });
 
   it("moves when the period moves, which is what makes the bounds real", async () => {

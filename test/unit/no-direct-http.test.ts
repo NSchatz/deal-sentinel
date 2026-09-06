@@ -52,6 +52,7 @@ import {
   maskStringLiterals,
   normaliseComputedAccess,
   serverOnlyImportLines,
+  serverOnlyImportSpans,
   stripComments,
 } from "@deal-sentinel/governor";
 import type { SourceFile } from "@deal-sentinel/governor";
@@ -527,6 +528,76 @@ describe("criterion 29: a server socket is not an HTTP client", () => {
       );
     }
     assert.ok(SERVER_ONLY_HTTP_BINDINGS.includes("createServer"));
+  });
+
+  it("exempts the IMPORT and not the line it landed on", () => {
+    // The granularity that makes the exemption a claim about an import rather
+    // than a claim about a row of characters. Every offending import in this
+    // fixture shares its line with a server-only one, so a line-scoped
+    // exemption reports nothing at all here.
+    const findings = findDirectHttpCallSites([
+      fixture(
+        "server-only-import-sharing-a-line.ts.fixture",
+        "packages/dashboard/src/formatted.ts",
+      ),
+    ]);
+
+    const importLines = new Set(
+      findings
+        .filter((finding) => finding.rule === "client-import")
+        .map((finding) => finding.line),
+    );
+    // Line 14 carries the client module beside the server, line 15 the raw
+    // socket. Line 16 is two server-only imports and must stay clean.
+    assert.deepEqual(
+      [...importLines].sort((left, right) => left - right),
+      [14, 15],
+      describeFindings(findings),
+    );
+    assert.equal(
+      importLines.has(16),
+      false,
+      "a line carrying two server-only imports was reported, so the exemption " +
+        "no longer covers the thing it exists for: " + describeFindings(findings),
+    );
+    // The string-literal rule reads the same characters and has to agree, or
+    // the exemption is only half scoped.
+    assert.deepEqual(
+      [
+        ...new Set(
+          findings
+            .filter((finding) => finding.rule === "client-module-literal")
+            .map((finding) => finding.line),
+        ),
+      ].sort((left, right) => left - right),
+      [14, 15],
+      describeFindings(findings),
+    );
+  });
+
+  it("keeps every server-only import on a shared line exempt, so it is not just refusing lines", () => {
+    // The mutation for the test above: the same shape with NOTHING that can
+    // send on it. If the fix had been "a shared line is never exempt", this
+    // would report, and the exemption would have stopped meaning anything.
+    const specifier = "node" + ":" + "http";
+    const source = [
+      `import { createServer } from "${specifier}"; import { Server } from "${specifier}";`,
+      "export const serve = createServer;",
+    ].join("\n");
+
+    const findings = findDirectHttpCallSites([
+      { path: "packages/dashboard/src/two-servers.ts", text: source },
+    ]);
+    assert.deepEqual(findings, [], describeFindings(findings));
+  });
+
+  it("scopes the exemption to characters, so the spans say where it applies", () => {
+    const specifier = "node" + ":" + "http";
+    const line = `import { createServer } from "${specifier}";`;
+    const spans = serverOnlyImportSpans(`${line} const after = 1;`);
+    assert.equal(spans.length, 1);
+    assert.equal(spans[0].start, 0);
+    assert.equal(spans[0].end, line.length - 1, "the span must stop at the specifier");
   });
 
   it("marks the lines a multi-line server-only import spans, and no others", () => {

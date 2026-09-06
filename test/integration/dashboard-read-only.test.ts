@@ -27,19 +27,34 @@
  * which is exactly the state where a careless read does damage, and every row of
  * all five tables is compared before and after.
  *
+ * CRITERION 24 IS ASKED OF THE SOCKET. Three addresses, not one: the address
+ * the configuration named answers, a second loopback address on the same port
+ * does not, and this machine's ROUTABLE address does not either. The last of
+ * those is the exposure the spec's Blast Radius paragraph calls irreversible,
+ * and it is followed by its own mutation - the same probe against a
+ * configuration the loader refuses, handed to `startDashboard` directly, which
+ * DOES answer there. Without that pair, "the routable address did not answer"
+ * would be indistinguishable from a probe that cannot find a socket.
+ *
  * CRITERION 27 IS GRADED BY STOPPING THE DATABASE. Not by pointing a second
  * dashboard at a closed port: "while the dashboard is serving" means the same
  * process, still up, that has already answered.
  */
 
 import assert from "node:assert/strict";
+import { networkInterfaces } from "node:os";
 import { after, before, describe, it } from "node:test";
 import pg from "pg";
 import type { APIRequestContext, Browser } from "playwright";
 
 import { addWatchlistEntry, createDatabase, initializeHistory } from "@deal-sentinel/db";
 import type { HistoryDatabase } from "@deal-sentinel/db";
-import { READ_METHODS, isLoopbackAddress } from "@deal-sentinel/dashboard";
+import {
+  DashboardConfigError,
+  READ_METHODS,
+  isLoopbackAddress,
+} from "@deal-sentinel/dashboard";
+import type { DashboardConfig } from "@deal-sentinel/dashboard";
 import { periodStartFor } from "@deal-sentinel/governor";
 
 import {
@@ -73,6 +88,22 @@ const GOVERNOR = bestBuyGovernorConfig({
     [SOURCE]: { allowance: { limit: LIMIT, periodMs: DAY, warnFraction: 0.8 } },
   },
 });
+
+/**
+ * A non-loopback IPv4 address this machine actually carries: the one the rest
+ * of the network can reach, which is what "bind only the address its
+ * configuration names" is protecting.
+ */
+function routableAddress(): string | null {
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.internal) continue;
+      if (address.family !== "IPv4") continue;
+      return address.address;
+    }
+  }
+  return null;
+}
 
 /** Every table criterion 11 names. */
 const GUARDED_TABLES = [
@@ -311,6 +342,83 @@ describe("criterion 24: it binds the address and port its configuration names", 
       );
     } finally {
       await second.close();
+    }
+  });
+
+  it("does not answer on an address the rest of the network can reach", async () => {
+    // The exposure the spec's Blast Radius paragraph calls irreversible, asked
+    // of the socket rather than of the loader: this machine's routable address.
+    // A dashboard the configuration pointed at loopback must be dead here.
+    const reachable = routableAddress();
+    assert.ok(
+      reachable !== null,
+      "this machine has no non-loopback IPv4 address, so this criterion " +
+        "cannot be graded here and must not be reported as passing",
+    );
+
+    const port = await freeLoopbackPort();
+    const local = await startTestDashboard({
+      pool,
+      config: testDashboardConfig({ bindAddress: "127.0.0.1", port }),
+      governor: GOVERNOR,
+      registry: testRegistry(),
+      now: () => NOW,
+    });
+    try {
+      assert.equal((await api.get(`http://127.0.0.1:${port}/`)).status(), 200);
+      await assert.rejects(
+        api.get(`http://${reachable}:${port}/`, { timeout: 5_000 }),
+        `${reachable} answered on a dashboard configured to bind 127.0.0.1, ` +
+          "so this process is reachable from the network with no " +
+          "authentication in front of a page that renders vendor refusal " +
+          "details derived from URLs carrying a credential",
+      );
+    } finally {
+      await local.close();
+    }
+  });
+
+  it("MUTATION: with the loader bypassed, a wildcard really does answer there", async () => {
+    // The check above can only mean something if the probe is capable of
+    // finding a socket on that address at all. So the same probe is run against
+    // a configuration the LOADER REFUSES - `::0`, one of the spellings of the
+    // unspecified address it decides semantically - handed to `startDashboard`
+    // directly. It answers, which proves two things at once: the probe works,
+    // and the configuration loader is the only thing standing between the
+    // committed file and a socket on every interface this machine has.
+    const reachable = routableAddress();
+    assert.ok(reachable !== null);
+
+    assert.throws(
+      () => testDashboardConfig({ bindAddress: "::0" }),
+      DashboardConfigError,
+      "the loader accepted ::0, so the rest of this test is not a mutation",
+    );
+
+    const port = await freeLoopbackPort();
+    const bypassed: DashboardConfig = {
+      ...testDashboardConfig({ port }),
+      bindAddress: "::0",
+    };
+    const wildcard = await startTestDashboard({
+      pool,
+      config: bypassed,
+      governor: GOVERNOR,
+      registry: testRegistry(),
+      now: () => NOW,
+    });
+    try {
+      const answered = await api.get(`http://${reachable}:${port}/`, {
+        timeout: 10_000,
+      });
+      assert.equal(
+        answered.status(),
+        200,
+        "the wildcard bind did NOT answer on the routable address, so the " +
+          "assertion above proves nothing about the loader",
+      );
+    } finally {
+      await wildcard.close();
     }
   });
 });

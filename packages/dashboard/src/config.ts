@@ -25,17 +25,22 @@
  *     had, on a machine whose residential IP the whole household depends on, and
  *     the display path behind it can show a vendor's refusal detail - which is
  *     derived from a URL that carries a credential in its query string. The
- *     committed file names a LOOPBACK address, and the wildcards `0.0.0.0` and
- *     `::` are REFUSED outright: a wildcard is not an address the configuration
- *     names, it is every address the machine has, including the one the rest of
- *     the world can reach. A specific non-loopback address is permitted, because
- *     the owner is entitled to put this on their own LAN deliberately, and the
- *     start check says out loud when the configured address is not loopback.
+ *     committed file names a LOOPBACK address. What the loader ENFORCES is that
+ *     the value names ONE address and that the one it names is not the
+ *     unspecified address, which is every address the machine has, including the
+ *     one the rest of the world can reach. That question is decided from the
+ *     address's BYTES by `address.ts` and never from its text, because the
+ *     unspecified address has a dozen spellings this runtime binds identically
+ *     and a list of them closes only the ones somebody thought of. A specific
+ *     non-loopback address is permitted, because the owner is entitled to put
+ *     this on their own LAN deliberately, and the start check says out loud when
+ *     the configured address is not loopback.
  */
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { isLoopback, parseIpAddress, stripBrackets, unspecifiedFamily } from "./address.ts";
 import { DashboardConfigError } from "./errors.ts";
 
 /** The committed configuration, beside the governor's, the sources' and the alerts'. */
@@ -43,14 +48,12 @@ export const DEFAULT_DASHBOARD_CONFIG_PATH = fileURLToPath(
   new URL("../../../config/dashboard.json", import.meta.url),
 );
 
-/**
- * Addresses that are not an address: every interface the machine has, which is
- * the one thing "bind only the address its configuration names" forbids.
- */
-const WILDCARD_ADDRESSES = ["0.0.0.0", "::", "*", ""];
-
 export type DashboardConfig = {
-  /** The single address the server binds. Never a wildcard. */
+  /**
+   * The single address the server binds, as a literal IP address with any
+   * surrounding brackets removed. Never the unspecified address, in either
+   * family and in any spelling of it.
+   */
   bindAddress: string;
   /** The port it binds. */
   port: number;
@@ -139,34 +142,56 @@ export function validateDashboardConfig(
 }
 
 /**
- * Is this a loopback address? Every address in 127.0.0.0/8 is, and so is `::1`.
+ * Is this a loopback address? Every address in 127.0.0.0/8 is, so is `::1`, and
+ * so is the IPv4-mapped form of either - decided from the bytes, like every
+ * other question this file asks about an address.
  *
  * Reported rather than enforced: see the header. What IS enforced is that the
- * address is not a wildcard.
+ * address names one address and that it is not the unspecified one.
  */
 export function isLoopbackAddress(address: string): boolean {
-  const trimmed = address.trim().toLowerCase();
-  if (trimmed === "::1" || trimmed === "[::1]") return true;
-  const octets = trimmed.split(".");
-  if (octets.length !== 4) return false;
-  if (!octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255)) {
-    return false;
-  }
-  return octets[0] === "127";
+  const parsed = parseIpAddress(address);
+  return parsed !== null && isLoopback(parsed);
 }
 
+/**
+ * The one address this process will bind, or a refusal.
+ *
+ * Two refusals, in this order, because they are two different mistakes and each
+ * deserves its own sentence: the value names EVERY address, or it names no
+ * address this loader can pin to an interface.
+ */
 function readBindAddress(node: Record<string, unknown>, origin: string): string {
-  const address = requireNonEmptyString(node, "bindAddress", origin);
-  if (WILDCARD_ADDRESSES.includes(address)) {
+  const given = requireNonEmptyString(node, "bindAddress", origin);
+  const address = stripBrackets(given);
+
+  const wildcard = unspecifiedFamily(address);
+  if (wildcard !== null) {
     throw new DashboardConfigError(
-      `${origin}: bindAddress is ${JSON.stringify(address)}, which is not an ` +
-        "address - it is every address this machine has. This process serves a " +
-        "display path that can show a vendor's refusal detail, and a refusal " +
-        "detail is derived from a URL carrying a credential in its query " +
-        "string. Name one address. The committed file names a loopback one.",
+      `${origin}: bindAddress is ${JSON.stringify(given)}, which is the ` +
+        `unspecified ${wildcard === "ipv4" ? "IPv4" : "IPv6"} address however ` +
+        "it is spelled, so it is not an address - it is every address this " +
+        "machine has. This process serves a display path that can show a " +
+        "vendor's refusal detail, and a refusal detail is derived from a URL " +
+        "carrying a credential in its query string. Name one address. The " +
+        "committed file names a loopback one.",
       { setting: "bindAddress" },
     );
   }
+
+  if (parseIpAddress(address) === null) {
+    throw new DashboardConfigError(
+      `${origin}: bindAddress is ${JSON.stringify(given)}, which is not a ` +
+        "literal IP address. This process binds what the configuration names " +
+        "and nothing else, so a name is refused rather than resolved: what a " +
+        "resolver answers at listen time is not what the file said, and it can " +
+        "be every address this machine has. Write the address itself, in " +
+        "dotted-quad or ordinary IPv6 form. The committed file names a " +
+        "loopback one.",
+      { setting: "bindAddress" },
+    );
+  }
+
   return address;
 }
 

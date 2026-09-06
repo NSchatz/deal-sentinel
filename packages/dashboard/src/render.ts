@@ -168,12 +168,23 @@ function renderSourceRow(source: SourceHealth, context: RenderContext): string {
         `<span data-count-refused>${source.counts.refused} refused</span> ` +
         `(<span data-count-total>${source.counts.total}</span> in total)`;
 
+  // THE DENOMINATOR IS ON THE PAGE, not left to be worked out from the counts
+  // beside it. Every rate here is over the records that LEFT this process, and
+  // a reader deciding whether a politeness ceiling is right is entitled to see
+  // which number the percentage is a percentage of.
   const rates =
     source.rates === null
-      ? `<span data-no-rates>no rate: nothing was recorded to compute one from</span>`
+      ? source.counts === null
+        ? `<span data-no-rates="no-records">no rate: nothing was recorded to compute one from</span>`
+        : `<span data-no-rates="nothing-sent">no rate: every record in this period is a refusal this system made, so nothing left this process for the far side to answer</span>`
       : `<span data-rate="success">${percent(source.rates.success)} success</span>, ` +
         `<span data-rate="error">${percent(source.rates.error)} error</span>, ` +
-        `<span data-rate="blocked">${percent(source.rates.blocked)} blocked</span>`;
+        `<span data-rate="blocked">${percent(source.rates.blocked)} blocked</span> ` +
+        `<span data-rate-basis>of <span data-rate-denominator>${source.rates.attempted}</span> request(s) that left this process` +
+        (source.counts !== null && source.counts.refused > 0
+          ? `; the <span data-rate-excluded>${source.counts.refused}</span> this system refused to send are counted above and are not under this line`
+          : "") +
+        `</span>`;
 
   return `        <tr data-source-row data-source-id="${escape(source.sourceId)}">
           <td data-source-name>${escape(source.sourceId)}</td>
@@ -292,8 +303,26 @@ function renderSourceStates(source: SourceHealth, context: RenderContext): strin
 /* One listing                                                                 */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * One listing's page.
+ *
+ * THE TWO IDENTIFIERS ON THIS PAGE CAME OUT OF THE QUERY STRING and are echoed
+ * back into five different answers, so they go through the redactor like every
+ * other string on a display path. Nothing in this system puts a credential into
+ * a listing id today; that is a fact about today's callers and not a property of
+ * the page, and this is the last place a leak is caught. A reflected
+ * `?listing=x%26apiKey%3Dsecret` costs a string scan to neuter and a credential
+ * published to whatever can reach the socket to ignore.
+ *
+ * The redaction is applied ONCE, here, and every use below reads the redacted
+ * pair - the title, the visible text, and the `data-` attributes the graders
+ * assert against - so there is no spelling of these two values on this page that
+ * skipped it.
+ */
 export function renderListing(view: ListingView, context: RenderContext): string {
-  const title = `deal-sentinel - ${view.listingId}`;
+  const listingId = context.redactor.scrub(view.listingId);
+  const sourceId = context.redactor.scrub(view.sourceId);
+  const title = `deal-sentinel - ${listingId}`;
 
   if (view.kind === "not-tracked") {
     // NO CHART, NO AXIS, NO PRICE. A listing that is on no watchlist entry is
@@ -304,10 +333,10 @@ export function renderListing(view: ListingView, context: RenderContext): string
       `
       <h1>Not tracked</h1>
       <p class="empty" data-not-tracked
-         data-source-id="${escape(view.sourceId)}"
-         data-listing-id="${escape(view.listingId)}">
-        ${escape(view.listingId)} is not tracked: no watchlist entry for source
-        ${escape(view.sourceId)} names it, so this system holds no price history
+         data-source-id="${escape(sourceId)}"
+         data-listing-id="${escape(listingId)}">
+        ${escape(listingId)} is not tracked: no watchlist entry for source
+        ${escape(sourceId)} names it, so this system holds no price history
         for it and shows none.
       </p>
       <p><a href="/">Back to the operator view</a></p>
@@ -326,12 +355,12 @@ export function renderListing(view: ListingView, context: RenderContext): string
     return page(
       title,
       `
-      <h1>${escape(view.listingId)}</h1>
-      <p class="sub">${escape(view.sourceId)}</p>
+      <h1>${escape(listingId)}</h1>
+      <p class="sub">${escape(sourceId)}</p>
       <p class="empty" data-empty-state
-         data-source-id="${escape(view.sourceId)}"
-         data-listing-id="${escape(view.listingId)}">
-        No price has been observed for ${escape(view.listingId)} in this range.
+         data-source-id="${escape(sourceId)}"
+         data-listing-id="${escape(listingId)}">
+        No price has been observed for ${escape(listingId)} in this range.
         There is nothing to plot, so nothing is plotted: no axis, no line and no
         point is drawn for it.
       </p>
@@ -345,11 +374,11 @@ export function renderListing(view: ListingView, context: RenderContext): string
     return page(
       title,
       `
-      <h1>${escape(view.listingId)}</h1>
-      <p class="sub">${escape(view.sourceId)}</p>
+      <h1>${escape(listingId)}</h1>
+      <p class="sub">${escape(sourceId)}</p>
       <p class="notice" data-unattributed
-         data-source-id="${escape(view.sourceId)}"
-         data-listing-id="${escape(view.listingId)}">
+         data-source-id="${escape(sourceId)}"
+         data-listing-id="${escape(listingId)}">
         Refusing to show any observed value for this listing. Its source's terms
         require the content to be attributed and this build cannot establish the
         attribution, so the value is withheld rather than shown unattributed.
@@ -366,13 +395,13 @@ export function renderListing(view: ListingView, context: RenderContext): string
     return page(
       title,
       `
-      <h1>${escape(view.listingId)}</h1>
-      <p class="sub">${escape(view.sourceId)}</p>
+      <h1>${escape(listingId)}</h1>
+      <p class="sub">${escape(sourceId)}</p>
       ${attribution}
       <p class="notice" data-mixed-currency
          data-currencies="${escape(view.currencies.join(","))}"
-         data-source-id="${escape(view.sourceId)}"
-         data-listing-id="${escape(view.listingId)}">
+         data-source-id="${escape(sourceId)}"
+         data-listing-id="${escape(listingId)}">
         This listing's observations in the selected range carry more than one
         currency: ${view.currencies.map((code) => `<span data-currency-found>${escape(code)}</span>`).join(", ")}.
         They are not one comparable series and are not plotted as one. Narrow the
@@ -387,8 +416,8 @@ export function renderListing(view: ListingView, context: RenderContext): string
   return page(
     title,
     `
-      <h1>${escape(view.listingId)}</h1>
-      <p class="sub">${escape(view.sourceId)} - <span data-observation-count>${view.points.length}</span> stored observation(s) in this range</p>
+      <h1>${escape(listingId)}</h1>
+      <p class="sub">${escape(sourceId)} - <span data-observation-count>${view.points.length}</span> stored observation(s) in this range</p>
       ${attribution}
       ${renderChart(view.points, view.currency)}
       ${renderPriceTable(view.points, view.currency)}

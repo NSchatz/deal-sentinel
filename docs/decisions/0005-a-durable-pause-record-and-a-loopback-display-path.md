@@ -61,13 +61,20 @@ display path, and both are exposures the rest of the system does not have:
   page would otherwise show. Redacting twice costs a string scan. Redacting once
   costs a credential published to whatever can reach the socket, and no re-run
   undoes that;
-- so `config/dashboard.json` names `127.0.0.1`, and the loader REFUSES `0.0.0.0`
-  and `::` outright. A wildcard is not an address the configuration names; it is
-  every address the machine has. A specific non-loopback address is permitted,
-  because the owner is entitled to put this on their own LAN deliberately, and
-  the start check says out loud when the configured address is not loopback.
-  There is no authentication, no TLS and no accounts, and that is stated rather
-  than implied;
+- so `config/dashboard.json` names `127.0.0.1`, and the loader REFUSES the
+  unspecified address. It refuses it SEMANTICALLY, from the bytes the value
+  parses to and never from its text: `0.0.0.0`, `::`, `::0`, `::ffff:0.0.0.0`,
+  `0:0:0:0:0:0:0:0`, `000.000.000.000` and `0` are one address written seven
+  ways, this runtime binds every one of them to every interface, and a denylist
+  of spellings would close the ones somebody thought of and leave the rest open.
+  The value must also be a literal IP address rather than a name, because a name
+  is resolved at listen time to whatever the resolver answers and that is not
+  what the configuration named. A wildcard is not an address the configuration
+  names; it is every address the machine has. A specific non-loopback address is
+  permitted, because the owner is entitled to put this on their own LAN
+  deliberately, and the start check says out loud when the configured address is
+  not loopback. There is no authentication, no TLS and no accounts, and that is
+  stated rather than implied;
 - the process READS. Every query is a SELECT, a method that is not GET or HEAD
   is refused before the router runs, and the allowance is read AS ROWS rather
   than through `AllowanceLedger.check` - which announces the stop when it finds
@@ -80,7 +87,11 @@ display path, and both are exposures the rest of the system does not have:
   and a client as a RULE - an import binding only server-side names is not a
   client import, anywhere, for anybody - rather than by adding a fourth path to
   its allowlist. An allowlist entry says "this file may name a client", which is
-  exactly the wrong claim about a file that serves.
+  exactly the wrong claim about a file that serves. The exemption is scoped to
+  the CHARACTERS the server-only import occupies and not to the line it landed
+  on: two imports can share a line, a formatter joining them is a whitespace
+  diff nobody reviews, and a line-scoped exemption would hand one import's
+  verdict to whatever was written beside it.
 
 **Content on that page carries its source's attribution, or the value is not
 shown.** `packages/sources/src/attribution.ts` already REFUSES an emission that
@@ -104,7 +115,13 @@ fail-safe names.
 1. The phase is placed before the first scraped breadth on purpose. Block rate
    is what says whether the politeness ceilings are right, and adding retailers
    without it is tuning blind. That is only true if the block rate is READABLE,
-   which means durable, which means a database.
+   which means durable, which means a database - and it is only USEFUL if its
+   denominator is what left the process. A ceiling is tuned against the requests
+   that reached the far side, so `refused` is counted and shown but is not under
+   the line; over the total, the same block rate shrinks every time this system
+   is careful enough not to send, which is the opposite of the signal the
+   operator is looking for. The denominator is printed beside the percentages so
+   the reading is visible rather than assumed.
 
 2. The three states an operator can confuse cost different things and want
    different actions, so they are three columns and three sentences and never
