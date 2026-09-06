@@ -32,19 +32,24 @@
  *   4. THE REMAINING NOTIFICATIONS ARE STILL ATTEMPTED after an ordinary
  *      failure. One listing's delivery failing says nothing about the next.
  *
- * AND TWO RULES ABOUT SECRETS. The credential is read once, put in a header, and
- * never anywhere else: not in the body, not in a report, not in a stored row.
- * Every string this module hands back has been through the redactor, because
- * the governor quotes the request URL inside its own refusal details and the
- * endpoint may be a credential in itself. And a credential written into the
- * ENDPOINT'S USERINFO - `https://user:password@host/topic` - is not sent at all:
- * a credential belongs in a header, where this module can keep it out of every
- * string it reports, and a credential inside the URL is one the governor, the
- * transport and every error either of them raises would quote back verbatim.
- * The redactor catches those quotes; refusing to send is what stops them being
- * made. A credential-bearing QUERY parameter is a different matter and is
- * accepted, because a webhook URL is a bearer credential wearing a URL's clothes
- * and refusing one would refuse the channels this system exists to reach.
+ * AND THREE RULES ABOUT SECRETS. The credential is read once, put in a header,
+ * and never anywhere else: not in the body, not in a report, not in a stored
+ * row. THE ENDPOINT IS NEVER REPORTED EITHER, only its origin - and that is a
+ * property of the redactor rather than of this module remembering, because the
+ * governor quotes the request URL verbatim inside its own refusal details and a
+ * transport error quotes it again. The redactor is built WITH the endpoint and
+ * cuts every occurrence of it back to the origin, so which component of it the
+ * operator made a secret - the path that is a topic, a query parameter nobody
+ * put on a list - stops being a question this module has to have answered.
+ * Finally, a credential written into the ENDPOINT'S USERINFO -
+ * `https://user:password@host/topic` - is not sent at all: a credential belongs
+ * in a header, and one inside the URL would be handed to the transport, to the
+ * remote server's logs and to every error raised along the way. Refusing to send
+ * is what stops those copies being made; the redactor is what keeps the ones
+ * this process composes clean. A credential-bearing QUERY parameter is a
+ * different matter and is accepted, because a webhook URL is a bearer credential
+ * wearing a URL's clothes and refusing one would refuse the channels this system
+ * exists to reach - it is never printed, on the same rule as the path.
  */
 
 import type { Governor } from "@deal-sentinel/governor";
@@ -52,7 +57,7 @@ import type { Governor } from "@deal-sentinel/governor";
 import type { AlertChannelConfig } from "./config.ts";
 import { MissingChannelCredentialError } from "./errors.ts";
 import type { AlertNotification } from "./notification.ts";
-import { channelOrigin, channelRedactor } from "./redaction.ts";
+import { carriesUserinfo, channelOrigin, channelRedactor } from "./redaction.ts";
 import type { Redactor } from "./redaction.ts";
 
 export type DeliveryOutcome =
@@ -139,7 +144,9 @@ export type GovernedChannelParts = {
 
 export function governedChannel(parts: GovernedChannelParts): AlertChannel {
   const { governor, config, sourceId, credential } = parts;
-  const redactor: Redactor = channelRedactor(credential);
+  // Built with BOTH secrets it has: the credential, and the endpoint itself,
+  // which is a secret whenever the operator put one in its path or its query.
+  const redactor: Redactor = channelRedactor(credential, config.endpoint);
   const describedAs =
     config.endpoint === null ? "no channel configured" : channelOrigin(config.endpoint);
   // Decided once: the endpoint does not change between notifications, and a
@@ -208,7 +215,10 @@ export function governedChannel(parts: GovernedChannelParts): AlertChannel {
         // Every governor refusal lands here, `unconfigured-host` included -
         // which is what a notification host with no ceiling gets, and it is a
         // failure rather than a stop because the next run may find the ceiling
-        // configured. Scrubbed: the governor quotes the URL it was given.
+        // configured. Scrubbed, and this is the string that needs it most: the
+        // governor quotes the whole href it was given, so what arrives here
+        // carries the path and the query the operator configured until the
+        // redactor's fourth rule cuts them back to the origin.
         return {
           delivered: false,
           kind: "failed",
@@ -255,24 +265,4 @@ export function governedChannel(parts: GovernedChannelParts): AlertChannel {
       return { delivered: true, status };
     },
   };
-}
-
-/**
- * Does this endpoint keep a credential in its userinfo component?
- *
- * Asked on the PARSED URL rather than through the redactor, and deliberately:
- * the redactor's URL rules also cover a credential-bearing query parameter, and
- * an endpoint carrying one of those is a webhook URL, which this system accepts
- * and never prints. Userinfo is the case that is refused, so it is the case this
- * predicate names.
- */
-function carriesUserinfo(endpoint: string): boolean {
-  try {
-    const url = new URL(endpoint);
-    return url.username.length > 0 || url.password.length > 0;
-  } catch {
-    // Unreachable through the loader, which refuses an endpoint that does not
-    // parse. A string that is not a URL carries no userinfo either.
-    return false;
-  }
 }

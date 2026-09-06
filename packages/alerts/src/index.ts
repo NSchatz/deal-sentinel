@@ -39,9 +39,11 @@ export type {
 
 export {
   CREDENTIAL_PLACEHOLDER,
+  carriesUserinfo,
   channelOrigin,
   channelRedactor,
   redactCredentialParameters,
+  redactEndpointUrls,
   redactUrlCredentials,
   redactUrlUserinfo,
 } from "./redaction.ts";

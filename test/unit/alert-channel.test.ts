@@ -64,6 +64,12 @@ import type { LoopbackServer } from "../support/loopback-server.ts";
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const NOW = new Date("2026-09-01T12:00:00.000Z");
 const SECRET = "tk-not-a-real-token-0123456789";
+/**
+ * A path that is a credential. The carried source for this spec says of the
+ * channel its roadmap cites: "Because there is no sign-up, the topic is
+ * essentially a password". A denylist of parameter names never reaches it.
+ */
+const TOPIC = "kitchen-deals-not-a-real-topic";
 const CHANNEL_SOURCE = "alert-channel";
 
 /** What the stub server was asked for, beyond what the harness records. */
@@ -540,9 +546,13 @@ describe("A14: no credential reaches a body, a stored record or a report", () =>
     assert.equal(outcome.detail.includes(SECRET), false);
   });
 
-  it("scrubs a credential-bearing endpoint out of a governor refusal", async () => {
+  it("cuts a credential-bearing endpoint back to its origin in a governor refusal", async () => {
     // The governor quotes the URL it was handed inside its refusal detail, and
-    // a notification endpoint can carry the credential in its query string.
+    // a notification endpoint can carry the credential in its query string, in
+    // its path, or in both. What comes back names the ORIGIN and stops there:
+    // redacting the components somebody thought to list is not the property, as
+    // a path that is a topic and a parameter one character off the list both
+    // show. `test/unit/regress_0036_F5.ts` holds those two down by name.
     const clock = new FakeClock(NOW.getTime());
     const transport = recordingTransport(clock, robotsAbsent());
     const { governor } = buildGovernor({
@@ -554,7 +564,7 @@ describe("A14: no credential reaches a body, a stored record or a report", () =>
         },
       }),
     });
-    const config = channelConfig({}, `/deals?auth=${SECRET}`);
+    const config = channelConfig({}, `/${TOPIC}?auth=${SECRET}`);
     const channel = governedChannel({
       governor,
       config: config.channel,
@@ -571,7 +581,108 @@ describe("A14: no credential reaches a body, a stored record or a report", () =>
       false,
       "the governor's refusal carried the endpoint's credential into a report",
     );
-    assert.match(outcome.detail, /auth=\[redacted\]/);
+    assert.equal(
+      outcome.detail.includes(TOPIC),
+      false,
+      "the governor's refusal carried the endpoint's path into a report, and " +
+        "a path is a topic, which the cited channel calls a password",
+    );
+    assert.equal(
+      outcome.detail.includes(`${server.origin}/`),
+      false,
+      "the endpoint reached the report with something after its origin",
+    );
+    // Still USABLE: the operator learns which server refused them, and the
+    // sentence the governor wrote still reads as one.
+    assert.ok(outcome.detail.includes(server.origin));
+    assert.match(outcome.detail, /unconfigured-host/);
+    assert.match(outcome.detail, /is refused\. Add an entry/);
+  });
+
+  it("cuts the endpoint back even when a query parameter is on no list", async () => {
+    // The other limb, and the one no denylist reaches: `auth_token` is one
+    // character off `token` and is not `auth` either, so a rule that filters
+    // named parameters reports it verbatim. This one replaces instead.
+    const clock = new FakeClock(NOW.getTime());
+    const transport = recordingTransport(clock, robotsAbsent());
+    const { governor } = buildGovernor({
+      transport,
+      clock,
+      config: governorConfig({
+        hosts: {
+          "127.0.0.9": { maxRequests: 10, intervalMs: 60_000, minDelayMs: 1, jitterMs: 1 },
+        },
+      }),
+    });
+    const config = channelConfig({}, `/hook?auth_token=${SECRET}`);
+    const channel = governedChannel({
+      governor,
+      config: config.channel,
+      sourceId: config.sourceId,
+      credential: null,
+    });
+
+    const outcome = await channel.deliver(notification());
+
+    assert.equal(outcome.delivered, false);
+    if (outcome.delivered) return;
+    assert.equal(transport.sent.length, 0, "something left the process");
+    assert.equal(
+      outcome.detail.includes(SECRET),
+      false,
+      "a query credential under an unlisted name reached a reported failure",
+    );
+    assert.equal(outcome.detail.includes(`${server.origin}/`), false);
+  });
+
+  it("cuts the endpoint back out of a transport error too", async () => {
+    // The governor's OTHER quote of the whole href: a request that left and
+    // could not be reached. A closed loopback port answers nothing, so this is
+    // the transport-error path with the host's ceiling configured.
+    const clock = new FakeClock(NOW.getTime());
+    const closed = await closedLoopbackOrigin();
+    const { governor } = buildGovernor({
+      transport: LIVE_TRANSPORT,
+      clock,
+      config: governorConfig(),
+    });
+    const config = testAlertConfig({
+      channel: { endpoint: `${closed}/${TOPIC}?auth=${SECRET}` },
+    });
+    const channel = governedChannel({
+      governor,
+      config: config.channel,
+      sourceId: config.sourceId,
+      credential: null,
+    });
+
+    const outcome = await channel.deliver(notification());
+
+    assert.equal(outcome.delivered, false);
+    if (outcome.delivered) return;
+    assert.equal(outcome.kind, "failed");
+    assert.equal(outcome.detail.includes(SECRET), false);
+    assert.equal(
+      outcome.detail.includes(TOPIC),
+      false,
+      "a transport error carried the endpoint's path into a reported failure",
+    );
+    assert.ok(outcome.detail.includes(closed));
+  });
+
+  it("leaves a URL on another host alone", () => {
+    // The rule is scoped to the endpoint's own origin, so a listing link or any
+    // other URL quoted in the same sentence is not swallowed with it.
+    const other = "https://retailer.example.invalid/site/drill/8880044.p";
+    const scrubbed = channelRedactor(
+      null,
+      "https://notify.example.invalid/kitchen-deals",
+    ).scrub(`${other} was mentioned beside https://notify.example.invalid/kitchen-deals.`);
+
+    assert.ok(scrubbed.includes(other), "an unrelated URL was redacted");
+    assert.equal(scrubbed.includes("kitchen-deals"), false);
+    // The sentence keeps its full stop: the tail refuses to end on punctuation.
+    assert.match(scrubbed, /https:\/\/notify\.example\.invalid\.$/);
   });
 
   it("refuses to send to an endpoint carrying a credential in its userinfo", async () => {

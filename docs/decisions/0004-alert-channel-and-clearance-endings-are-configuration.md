@@ -26,14 +26,26 @@ byte this system sends.
 
 **The channel's credential travels in a header, and the endpoint's userinfo is
 not a second way to supply one.** An endpoint may be a secret in itself - a
-webhook URL is a bearer credential wearing a URL's clothes, and the cited
-channel documents an `?auth=` parameter of its own - so a credential-bearing
-endpoint is accepted and kept out of every string this system reports. The one
-shape that is refused rather than redacted is `https://user:password@host/topic`:
-a credential inside the URL is quoted back verbatim by the governor's refusal
-details and by every transport error the URL appears in, so the channel declines
-to send to one and says to move it to `channel.credential`, where it lives in a
-header and nowhere else.
+webhook URL is a bearer credential wearing a URL's clothes, the cited channel
+documents an `?auth=` parameter of its own, and its topic, which is just a path,
+"is essentially a password" in that channel's own words. So a credential-bearing
+endpoint is accepted, and it is kept out of every string this system reports BY
+REPLACEMENT RATHER THAN BY FILTERING: a reported failure names the channel's
+origin, and any occurrence of the endpoint, or of any URL sharing that origin, is
+cut back to that origin before the report is composed. The alternative - naming
+the components that may carry a secret - is a denylist, and the path is on
+nobody's denylist while a parameter one character off a listed name is on nobody
+else's either. The governor is the reason this matters at all: it quotes the
+whole href it was handed inside an `unconfigured-host` refusal and inside a
+transport error, and it is right to, because it does not know which of its
+callers configured a secret into a URL.
+
+The one shape that is refused rather than reported-about is
+`https://user:password@host/topic`. A credential in the userinfo is not merely
+quoted, it is SENT - to the transport, to the remote server and into whatever it
+logs - so the channel declines to deliver to one and the start check refuses to
+let a box come up pointed at one, both saying to move it to
+`channel.credential`, where it lives in a header and nowhere else.
 
 The alert MESSAGE FORMAT is decided here, and is not the operator's: every
 notification carries the rule that fired, the observed price with its ISO 4217

@@ -13,7 +13,7 @@
  * being able to run it on a box that is about to start, before anything has
  * been sent to anybody.
  *
- * Three things it reports, and two it refuses on:
+ * Three things it reports, and three it refuses on:
  *
  *   - every configured rule with its window, its minimum observation count and
  *     its cooldown, which is what the operator asked;
@@ -22,10 +22,14 @@
  *     household that has not chosen a channel yet should still be able to see
  *     what its rules would do;
  *   - REFUSES when the alert configuration is absent, unparseable or short of a
- *     required setting, and REFUSES when a configured channel's host carries no
- *     ceiling in `config/governor.json` or its source id is unknown there. That
- *     second refusal is the governor's own first two gates, surfaced before a
- *     run rather than discovered as a delivery that never arrives.
+ *     required setting; REFUSES when a configured channel's host carries no
+ *     ceiling in `config/governor.json` or its source id is unknown there, which
+ *     is the governor's own first two gates surfaced before a run rather than
+ *     discovered as a delivery that never arrives; and REFUSES a channel
+ *     endpoint carrying a credential in its userinfo, which the channel itself
+ *     will not send to, for the same reason - EVERY delivery would be refused,
+ *     and a check that called it "configured" would be describing a system that
+ *     silently sends nothing.
  */
 
 import { fileURLToPath } from "node:url";
@@ -36,6 +40,7 @@ import type { GovernorConfig } from "@deal-sentinel/governor";
 import { DEFAULT_ALERTS_CONFIG_PATH, loadAlertConfig } from "./config.ts";
 import type { AlertConfig } from "./config.ts";
 import { AlertConfigError } from "./errors.ts";
+import { carriesUserinfo } from "./redaction.ts";
 
 export type RuleReport = {
   ruleId: string;
@@ -111,18 +116,36 @@ export function alertsStartCheck(
 }
 
 /**
- * The governor's first two gates, asked before a run instead of after one.
+ * Every gate that would refuse EVERY delivery, asked before a run instead of
+ * after one.
  *
  * A channel whose host carries no ceiling is refused by the governor on every
- * attempt, and a source id it has never heard of is refused on every attempt
- * too. Both are configuration mistakes that look exactly like "the alerts
- * stopped working", so they are named here, at start, with the key to add.
+ * attempt; a source id it has never heard of is refused on every attempt too;
+ * and an endpoint with a credential in its userinfo is refused by the channel
+ * itself, before the governor is even asked. All three are configuration
+ * mistakes that look exactly like "the alerts stopped working" - the box starts,
+ * the rules fire, and every notification turns into a `failures[]` entry nobody
+ * is watching - so they are named here, at start, with the fix to make.
  */
 function assertChannelIsReachable(
   config: AlertConfig,
   governor: GovernorConfig,
   origin: string,
 ): void {
+  if (config.channel.endpoint !== null && carriesUserinfo(config.channel.endpoint)) {
+    // The endpoint is NOT quoted: it carries a credential, which is the whole
+    // finding. The setting names itself and that is enough to act on.
+    throw new AlertConfigError(
+      `${origin} configures a channel.endpoint carrying a credential in its ` +
+        "userinfo, the user:password@ before the host. The channel refuses to " +
+        "send to one, because a credential inside a URL is handed to the " +
+        "transport and quoted back by every error raised along the way, so no " +
+        "alert would ever be delivered. Move it to channel.credential, which " +
+        "puts it in a header and keeps it out of every reported string.",
+      { setting: "channel.endpoint" },
+    );
+  }
+
   if (config.channel.host === null) return;
 
   if (governor.hosts[config.channel.host] === undefined) {

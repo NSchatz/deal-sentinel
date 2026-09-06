@@ -263,6 +263,28 @@ describe("A10: the start check refuses to start, and says so with an exit code",
     assert.match(error.message, /ntfy\.example\.invalid/);
   });
 
+  it("refuses a channel endpoint carrying a credential in its userinfo", () => {
+    // The channel will not send to one, so an operator told "configured" here
+    // would be told the alerts work and then get silence. The refusal names the
+    // setting and does NOT quote the endpoint, which carries the credential.
+    const configured = path.join(scratch, "userinfo-alerts.json");
+    const document = alertDocument();
+    theChannel(document).endpoint =
+      "http://alerts:tk-not-a-real-token@127.0.0.1:8080/deals";
+    writeFileSync(configured, JSON.stringify(document, null, 2));
+
+    const error = caught(() =>
+      alertsStartCheck({ alertsPath: configured, governorPath: COMMITTED_GOVERNOR }),
+    );
+    assert.match(error.message, /userinfo/);
+    assert.match(error.message, /channel\.credential/);
+    assert.equal(
+      error.message.includes("tk-not-a-real-token"),
+      false,
+      "the refusal quoted the endpoint's credential",
+    );
+  });
+
   it("refuses a channel whose source id the governor has never heard of", () => {
     const configured = path.join(scratch, "unknown-source-alerts.json");
     const document = alertDocument({ sourceId: "not-in-the-governor" });
