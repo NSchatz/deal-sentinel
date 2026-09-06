@@ -16,6 +16,7 @@ import pg from "pg";
 import {
   HistoryAlreadyInitializedError,
   HistoryNotInitializedError,
+  SCHEMA_VERSION,
   assertHistoryInitialized,
   createDatabase,
   initializeHistory,
@@ -94,7 +95,12 @@ describe("the one-time initialization action", () => {
     );
 
     assert.ok(result.initializedAt instanceof Date);
-    assert.equal(result.schemaVersion, "0000_history_1_price_observations");
+    // Against the CONSTANT and not against a literal: the marker's whole job is
+    // to say which migration set produced a dump, so the version moves when the
+    // set does. That it moves is asserted where it belongs, in
+    // `telemetry-record.test.ts`; here what matters is that the marker carries
+    // whatever this build applied.
+    assert.equal(result.schemaVersion, SCHEMA_VERSION);
 
     const tables = await query(
       first.url,
@@ -111,7 +117,7 @@ describe("the one-time initialization action", () => {
     const marker = await withPool(first.url, (pool) =>
       assertHistoryInitialized(pool),
     );
-    assert.equal(marker.schemaVersion, "0000_history_1_price_observations");
+    assert.equal(marker.schemaVersion, SCHEMA_VERSION);
     assert.equal(marker.note, "initialized by the integration suite");
   });
 
@@ -145,7 +151,7 @@ describe("the one-time initialization action", () => {
     await withPool(first.url, async (pool) => {
       const marker = await readMarker(createDatabase(pool));
       assert.ok(marker !== null);
-      assert.equal(marker.schemaVersion, "0000_history_1_price_observations");
+      assert.equal(marker.schemaVersion, SCHEMA_VERSION);
     });
   });
 

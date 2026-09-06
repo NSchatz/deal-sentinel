@@ -45,11 +45,13 @@ import { describe, it } from "node:test";
 import * as governor from "@deal-sentinel/governor";
 import {
   HTTP_CLIENT_ALLOWLIST,
+  SERVER_ONLY_HTTP_BINDINGS,
   collectSourceFiles,
   describeFindings,
   findDirectHttpCallSites,
   maskStringLiterals,
   normaliseComputedAccess,
+  serverOnlyImportLines,
   stripComments,
 } from "@deal-sentinel/governor";
 import type { SourceFile } from "@deal-sentinel/governor";
@@ -449,6 +451,133 @@ describe("criterion 5: the adapter package has no way around the chokepoint", ()
       ),
       "a request left for somewhere the adapter was never pointed at",
     );
+  });
+});
+
+/**
+ * Acceptance criterion 29 of spec S0042-deal-sentinel-ops-5:
+ *
+ *   THE SYSTEM SHALL keep the single-chokepoint proof passing with no new module
+ *   added to its allowlist: nothing this spec adds reaches an HTTP client, and a
+ *   server socket is not one.
+ *
+ * The observability phase gave this system its first LISTENING socket, which
+ * needs `createServer`, which lives in the module the client rules ban by
+ * specifier. The answer is a rule and not a fourth allowlist entry: an import
+ * from `node:http` binding NOTHING BUT server-side names is not a client import,
+ * anywhere, for anybody - and every other spelling of that module is still a
+ * finding, in every file, exactly as it was.
+ *
+ * An exemption nobody showed can fail is a hole, so both halves are graded
+ * against committed fixtures below.
+ */
+describe("criterion 29: a server socket is not an HTTP client", () => {
+  it("accepts an import that binds only names which cannot send", () => {
+    const findings = findDirectHttpCallSites([
+      fixture("server-only-http-import.ts.fixture", "packages/dashboard/src/server.ts"),
+    ]);
+    assert.deepEqual(findings, [], describeFindings(findings));
+  });
+
+  it("still rejects a default import, a namespace import and a client binding", () => {
+    const findings = findDirectHttpCallSites([
+      fixture("http-import-not-server-only.ts.fixture", "packages/dashboard/src/leaky.ts"),
+    ]);
+    const rules = new Set(findings.map((finding) => finding.rule));
+    assert.ok(
+      rules.has("client-import"),
+      "an import of node:http that is not server-only walked past the check: " +
+        describeFindings(findings),
+    );
+    // Four import lines, and every one of them reported: the default import,
+    // the namespace import, the renamed `request` and the list that smuggles
+    // `get` in beside `createServer`.
+    assert.equal(
+      new Set(
+        findings
+          .filter((finding) => finding.rule === "client-import")
+          .map((finding) => finding.line),
+      ).size,
+      4,
+      describeFindings(findings),
+    );
+  });
+
+  it("reads the exemption off the bindings, not off the file", () => {
+    // The property that makes this a rule rather than an allowlist entry: the
+    // SAME path is accepted or rejected by what it imported, and the transport's
+    // own path gets no help from it either.
+    const serving = findDirectHttpCallSites([
+      fixture("server-only-http-import.ts.fixture", "packages/anything/src/at-all.ts"),
+    ]);
+    assert.deepEqual(serving, [], describeFindings(serving));
+
+    const sending = findDirectHttpCallSites([
+      fixture("http-import-not-server-only.ts.fixture", "packages/anything/src/at-all.ts"),
+    ]);
+    assert.ok(sending.length > 0);
+  });
+
+  it("names exactly the bindings that cannot send, and none that can", () => {
+    for (const binding of ["request", "get", "Agent", "ClientRequest", "default"]) {
+      assert.equal(
+        SERVER_ONLY_HTTP_BINDINGS.includes(binding),
+        false,
+        `${binding} is on the server-only list and it can reach a client`,
+      );
+    }
+    assert.ok(SERVER_ONLY_HTTP_BINDINGS.includes("createServer"));
+  });
+
+  it("marks the lines a multi-line server-only import spans, and no others", () => {
+    // The specifier is assembled at run time for the same reason every other
+    // sample in this file is: written out, it would make THIS file a finding of
+    // the very check it is testing.
+    const specifier = "node" + ":" + "http";
+    const source = [
+      `import { createServer } from "${specifier}";`,
+      "import type {",
+      "  IncomingMessage,",
+      "  ServerResponse,",
+      `} from "${specifier}";`,
+      "const elsewhere = 1;",
+    ].join("\n");
+    assert.deepEqual(
+      [...serverOnlyImportLines(source)].sort((left, right) => left - right),
+      [1, 2, 3, 4, 5],
+    );
+  });
+
+  it("finds nothing in the dashboard package as it stands", () => {
+    const files = collectSourceFiles(REPO_ROOT).filter((file) =>
+      file.path.startsWith("packages/dashboard/"),
+    );
+    assert.ok(files.length >= 6, `only ${files.length} dashboard files were scanned`);
+    assert.deepEqual(
+      findDirectHttpCallSites(files),
+      [],
+      describeFindings(findDirectHttpCallSites(files)),
+    );
+  });
+
+  it("reports a bypass parked inside the dashboard, so the pass above means something", () => {
+    const findings = findDirectHttpCallSites([
+      fixture("bypassing-adapter.ts.fixture", "packages/dashboard/src/server.ts"),
+    ]);
+    assert.ok(
+      findings.some((finding) => finding.rule === "fetch-call"),
+      "a client call in the dashboard's own path was not reported",
+    );
+  });
+
+  it("adds no path to the allowlist", () => {
+    for (const entry of HTTP_CLIENT_ALLOWLIST) {
+      assert.equal(
+        entry.path.startsWith("packages/dashboard/"),
+        false,
+        `${entry.path} is allowlisted, so the dashboard may name a client`,
+      );
+    }
   });
 });
 

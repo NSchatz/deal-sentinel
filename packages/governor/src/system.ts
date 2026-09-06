@@ -17,6 +17,7 @@ import { Governor } from "./governor.ts";
 import type { AllowanceStore } from "./allowance.ts";
 import { LIVE_TRANSPORT, nullNotifier, systemClock, systemRandom } from "./ports.ts";
 import type { Clock, Notifier, RandomSource } from "./ports.ts";
+import type { FetchTelemetry } from "./telemetry.ts";
 
 /**
  * The committed configuration file. Its numbers are conservative and
@@ -63,6 +64,13 @@ export function createSystemGovernor(options: {
   notifier?: Notifier;
   clock?: Clock;
   random?: RandomSource;
+  /**
+   * Where each offered fetch's outcome and each breaker pause are written down.
+   * Omitted, nothing is recorded and the governor behaves exactly as it did
+   * before the observability phase - which is also exactly how it behaves with
+   * one, because nothing this port returns is read.
+   */
+  telemetry?: FetchTelemetry;
 }): Governor {
   const config =
     options.config ?? loadGovernorConfig(options.configPath ?? DEFAULT_CONFIG_PATH);
@@ -77,5 +85,6 @@ export function createSystemGovernor(options: {
     transport: LIVE_TRANSPORT,
     notifier: options.notifier ?? nullNotifier,
     allowanceStore: options.allowanceStore,
+    telemetry: options.telemetry,
   });
 }

@@ -1,0 +1,23 @@
+/**
+ * A file that SERVES and cannot send.
+ *
+ * The only bindings it takes from node:http are the server constructor and the
+ * types around it. There is no way to get a request out of this file: the module
+ * object is never in scope, and neither `request` nor `get` is bound.
+ */
+
+import { createServer } from "node:http";
+import type {
+  IncomingMessage,
+  Server,
+  ServerResponse,
+} from "node:http";
+
+export function serve(port: number, address: string): Server {
+  const server = createServer((request: IncomingMessage, response: ServerResponse) => {
+    response.writeHead(200, { "content-type": "text/plain" });
+    response.end(`saw ${request.method ?? "GET"}`);
+  });
+  server.listen(port, address);
+  return server;
+}

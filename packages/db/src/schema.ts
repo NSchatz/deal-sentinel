@@ -1,7 +1,7 @@
 /**
  * The price history schema.
  *
- * Six tables, and all of them are load-bearing:
+ * Eight tables, and all of them are load-bearing:
  *
  *   `price_observations`       one row per listing per run, kept indefinitely.
  *                              History accrues at one observation per listing
@@ -36,6 +36,31 @@
  *                              becomes an alert every time the container comes
  *                              back, which is the failure mode that kills tools
  *                              like this one.
+ *   `fetch_outcomes`           one row per offered fetch: which source, which of
+ *                              the four outcome classes, how long it took, when
+ *                              its outcome was known, and the condition where
+ *                              there is one. Durable because every one of those
+ *                              facts otherwise dies in a process that exits, and
+ *                              "is the watcher still watching?" is then a
+ *                              question only a log can answer.
+ *   `breaker_pauses`           one row per breaker pause, with the condition
+ *                              that caused it. The breaker's own state is a Map
+ *                              in one process; a reader that is not that process
+ *                              can see a pause only because it is written here.
+ *
+ * THREE STATES THIS SCHEMA KEEPS APART, and conflating any two of them is the
+ * defect the separation exists to prevent:
+ *
+ *   a `breaker_pauses` row              THIS system pausing a source it judges
+ *                                       to be failing. Our verdict about them.
+ *   `governor_allowance_usage`          THIS system reaching its OWN configured
+ *     `.stopped_at`                     allowance for the period. Our budget.
+ *   a `source_period_stops` row         THE VENDOR answering 403. Their verdict
+ *                                       about us.
+ *
+ * An operator acts differently on each - raise nothing, wait for the period,
+ * or go and read the vendor's terms - so a view that showed them as one state
+ * would be worse than no view.
  */
 
 import {
@@ -405,6 +430,170 @@ export const alertCooldowns = pgTable(
   ],
 );
 
+/**
+ * The four outcome classes a recorded fetch is sorted into, and nothing else.
+ *
+ * Exhaustive on purpose, and distinguishable in every query and view over the
+ * record, because the four are acted on differently and a fifth bucket called
+ * "other" is where the interesting one would go:
+ *
+ *   `success`  a usable response arrived.
+ *   `error`    the request LEFT THIS PROCESS and no usable response came back -
+ *              a transport failure, or a status that is not a refusal and is
+ *              not usable.
+ *   `blocked`  the far side REFUSED it: a 429, or a status that source's own
+ *              terms document as limit-exceeded. This is the class the roadmap
+ *              phase exists for - block rate is what says whether the
+ *              politeness ceilings are right, and adding retailers without it
+ *              is tuning blind.
+ *   `refused`  THIS system declined to send it, and the governor's own refusal
+ *              reason is the condition. Nothing left the process.
+ */
+export const FETCH_OUTCOME_CLASSES = [
+  "success",
+  "error",
+  "blocked",
+  "refused",
+] as const;
+
+export type FetchOutcomeClass = (typeof FETCH_OUTCOME_CLASSES)[number];
+
+/**
+ * One offered fetch, and how it ended.
+ *
+ * WHAT THIS TABLE MAY NEVER HOLD: a response body, a credential, or a query
+ * string carrying one. A row is a class, a latency and a redacted condition,
+ * and that bound is what keeps the source retention ceilings out of this table
+ * entirely - there is no content here to age out. `raw_context` on an
+ * observation is content and has a per-source ceiling; a condition string is
+ * this system's own words about what happened and has none.
+ */
+export const fetchOutcomes = pgTable(
+  "fetch_outcomes",
+  {
+    /** Surrogate key. The natural key of a row is (source, instant). */
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
+
+    /** Which source the fetch was offered for, e.g. "bestbuy-api". */
+    sourceId: text("source_id").notNull(),
+
+    /** One of the four classes above. The check constraint is what makes it. */
+    outcomeClass: text("outcome_class").notNull(),
+
+    /**
+     * Whole milliseconds from when the request was OFFERED to when its outcome
+     * was KNOWN. Recorded for all four classes: a refusal that took a whole
+     * ceiling interval to arrive at is a fact about this system's behaviour
+     * just as much as a slow response is.
+     */
+    latencyMs: integer("latency_ms").notNull(),
+
+    /** The instant the outcome was known. Every rate is computed over this. */
+    occurredAt: timestamp("occurred_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+
+    /**
+     * Why, in this system's own words, REDACTED. Null for an ordinary success,
+     * which has no condition to state. Never a response body: see the table
+     * comment.
+     */
+    condition: text("condition"),
+  },
+  (table) => [
+    // The read this table exists for: one source's outcomes inside a period.
+    index("fetch_outcomes_source_occurred_idx").on(
+      table.sourceId,
+      table.occurredAt,
+    ),
+    // And the other one: this source's most recent success, for the staleness
+    // verdict, which reads one row per source and must not scan the table.
+    index("fetch_outcomes_source_class_occurred_idx").on(
+      table.sourceId,
+      table.outcomeClass,
+      table.occurredAt,
+    ),
+    check(
+      "fetch_outcomes_class_is_one_of_four",
+      sql`${table.outcomeClass} in ('success', 'error', 'blocked', 'refused')`,
+    ),
+    check("fetch_outcomes_latency_non_negative", sql`${table.latencyMs} >= 0`),
+  ],
+);
+
+/**
+ * A breaker pause, made durable at the moment it is announced.
+ *
+ * `Breaker` keeps every counter in a `Map` in one process and resumes lazily,
+ * so "this source is paused" is a fact that exists nowhere a second process can
+ * read it. A row here is what makes a pause visible to a reader that is not the
+ * process that paused the source, which is the whole of the phase assertion.
+ *
+ * WRITTEN EXACTLY ONCE PER PAUSE, because it is written from the one place a
+ * pause is announced: `Breaker.record`'s return value. Anything that polled
+ * `status()` instead would write a row per request behind the pause.
+ *
+ * `expires_at` rather than a duration: whether a source is paused RIGHT NOW is
+ * then a comparison a reader makes against its own clock, so an expired pause
+ * reads as resumed with no restart, no sweep job and no manual reset - and the
+ * expired row stays exactly where it is, as the history of what happened.
+ */
+export const breakerPauses = pgTable(
+  "breaker_pauses",
+  {
+    /** Surrogate key. The natural key of a row is (source, start). */
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
+
+    /** The source that was paused, e.g. "bestbuy-api". */
+    sourceId: text("source_id").notNull(),
+
+    /** When the pause began. */
+    pausedAt: timestamp("paused_at", { withTimezone: true, mode: "date" }).notNull(),
+
+    /** When it ends. A reader compares this against its own clock and nothing else. */
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+
+    /** How many outcomes in the window were an error or a block. */
+    failingCount: integer("failing_count").notNull(),
+
+    /** How many outcomes were in the window altogether. */
+    windowOutcomes: integer("window_outcomes").notNull(),
+
+    /** The configured window those outcomes were counted over, in milliseconds. */
+    windowMs: integer("window_ms").notNull(),
+
+    /**
+     * The configured failure-rate threshold that was crossed, as the exact text
+     * of the number the operator configured.
+     *
+     * TEXT and not a float column: this value is only ever SHOWN, never
+     * computed with, and a float column would let 0.5 come back as something
+     * with a tail on a display path. The repository's rule about floats is
+     * about money; this is the same instinct applied one table over, at no
+     * cost, because nothing here ever needs to add it up.
+     */
+    failureRateThreshold: text("failure_rate_threshold").notNull(),
+
+    /** The condition in words, as the breaker itself stated it. Redacted. */
+    condition: text("condition").notNull(),
+  },
+  (table) => [
+    // "Is this source paused now?" and "what pauses has it had?" are the same
+    // read with a different bound, and both are this index.
+    index("breaker_pauses_source_expires_idx").on(table.sourceId, table.expiresAt),
+    check("breaker_pauses_window_is_positive", sql`${table.windowMs} > 0`),
+    check(
+      "breaker_pauses_counts_are_sane",
+      sql`${table.failingCount} >= 0 and ${table.windowOutcomes} >= ${table.failingCount}`,
+    ),
+    check(
+      "breaker_pauses_expires_after_it_begins",
+      sql`${table.expiresAt} > ${table.pausedAt}`,
+    ),
+  ],
+);
+
 export type PriceObservationRow = typeof priceObservations.$inferSelect;
 export type NewPriceObservationRow = typeof priceObservations.$inferInsert;
 export type InitializationMarkerRow = typeof historyInitialization.$inferSelect;
@@ -413,3 +602,7 @@ export type WatchlistEntryRow = typeof watchlistEntries.$inferSelect;
 export type NewWatchlistEntryRow = typeof watchlistEntries.$inferInsert;
 export type SourcePeriodStopRow = typeof sourcePeriodStops.$inferSelect;
 export type AlertCooldownRow = typeof alertCooldowns.$inferSelect;
+export type FetchOutcomeRow = typeof fetchOutcomes.$inferSelect;
+export type NewFetchOutcomeRow = typeof fetchOutcomes.$inferInsert;
+export type BreakerPauseRow = typeof breakerPauses.$inferSelect;
+export type NewBreakerPauseRow = typeof breakerPauses.$inferInsert;

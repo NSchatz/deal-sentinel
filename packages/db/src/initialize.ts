@@ -34,8 +34,13 @@ export const MIGRATIONS_FOLDER = fileURLToPath(
 /**
  * The schema version recorded in the marker row, so a dump restored years later
  * says which migration set produced it.
+ *
+ * MOVES WITH THE LAST MIGRATION IN THE COMMITTED SET. A marker frozen at the
+ * first one says the same thing about every database this system has ever
+ * produced, which is worth nothing to somebody holding a dump and asking what
+ * is in it.
  */
-export const SCHEMA_VERSION = "0000_history_1_price_observations";
+export const SCHEMA_VERSION = "0004_ops_5_telemetry";
 
 export type InitializationResult = {
   initializedAt: Date;
@@ -79,6 +84,27 @@ export async function initializeHistory(
     schemaVersion: marker.schemaVersion,
     note: marker.note,
   };
+}
+
+/**
+ * Apply the committed migration set to a database that already has a history.
+ *
+ * SEPARATE FROM `initializeHistory`, which refuses to run twice because the
+ * second run of a "set up the database" action against a live history is how a
+ * price history gets wiped by somebody who meant well. This one is the other
+ * half of that pair and it is not the same action: the migration set is
+ * forward-only DDL, Drizzle records what it has applied, and running it against
+ * a live volume is exactly what an operator must do when a phase adds a table to
+ * a database that already holds observations.
+ *
+ * It writes NO marker. A migration is not an initialization, and a database with
+ * no marker still refuses to start after one.
+ */
+export async function applyMigrations(
+  pool: pg.Pool,
+  migrationsFolder: string = MIGRATIONS_FOLDER,
+): Promise<void> {
+  await migrate(createDatabase(pool), { migrationsFolder });
 }
 
 /**

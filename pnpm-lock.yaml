@@ -11,6 +11,9 @@ importers:
       '@deal-sentinel/alerts':
         specifier: '*'
         version: link:packages/alerts
+      '@deal-sentinel/dashboard':
+        specifier: '*'
+        version: link:packages/dashboard
       '@deal-sentinel/db':
         specifier: '*'
         version: link:packages/db
@@ -38,6 +41,9 @@ importers:
       pg:
         specifier: 8.13.1
         version: 8.13.1
+      playwright:
+        specifier: 1.63.0
+        version: 1.63.0
       typescript:
         specifier: 5.7.2
         version: 5.7.2
@@ -53,6 +59,21 @@ importers:
       '@deal-sentinel/governor':
         specifier: '*'
         version: link:../governor
+
+  packages/dashboard:
+    dependencies:
+      '@deal-sentinel/db':
+        specifier: '*'
+        version: link:../db
+      '@deal-sentinel/extractor':
+        specifier: '*'
+        version: link:../extractor
+      '@deal-sentinel/governor':
+        specifier: '*'
+        version: link:../governor
+      '@deal-sentinel/sources':
+        specifier: '*'
+        version: link:../sources
 
   packages/db:
     dependencies:
@@ -567,6 +588,16 @@ packages:
   pgpass@1.0.6:
     resolution: {integrity: sha512-lqIfH7bdgsxHAY/ZnUOwm+aCFKrsHBDhSFuk9O0B9uCqJAIkrKTo/+LQqLPLUS4e04+jCmQVikxE3QipH5chPw==}
 
+  playwright-core@1.63.0:
+    resolution: {integrity: sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright@1.63.0:
+    resolution: {integrity: sha512-+7ziBLidS4NaNCdt57SUDT+wYmmd5fmiQejUic/kb+YsYSCPyOOE9sebzMjNmQrsnNpDJqd4WHvV/8lfKfUDUg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   postgres-array@2.0.0:
     resolution: {integrity: sha512-VpZrUqU5A69eQyW2c5CA1jtLecCsN2U/bD6VilrFDWq5+5UIEVO7nazS3TEcHf1zuPYO/sqGvUvW62g86RXZuA==}
     engines: {node: '>=4'}
@@ -913,6 +944,12 @@ snapshots:
       pg-cloudflare: 1.4.0
 
   pgpass@1.0.6: {}
+
+  playwright-core@1.63.0: {}
+
+  playwright@1.63.0:
+    dependencies:
+      playwright-core: 1.63.0
 
   postgres-array@2.0.0: {}
 

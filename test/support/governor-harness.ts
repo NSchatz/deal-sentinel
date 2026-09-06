@@ -12,6 +12,7 @@ import { Governor, createMemoryAllowanceStore } from "@deal-sentinel/governor";
 import type {
   AllowanceStore,
   Clock,
+  FetchTelemetry,
   GovernorConfig,
   HttpTransport,
   Notification,
@@ -150,6 +151,8 @@ export function buildGovernor(options: {
   random?: () => number;
   notifier?: RecordingNotifier;
   allowanceStore?: AllowanceStore;
+  /** Omitted, nothing is recorded - which is what every test before OPS-5 asks for. */
+  telemetry?: FetchTelemetry;
 }): Harness {
   const config = options.config ?? testConfig();
   const clock = options.clock ?? new FakeClock();
@@ -163,6 +166,7 @@ export function buildGovernor(options: {
     transport: options.transport,
     notifier,
     allowanceStore,
+    telemetry: options.telemetry,
   });
 
   return { governor, clock, notifier, allowanceStore, config };

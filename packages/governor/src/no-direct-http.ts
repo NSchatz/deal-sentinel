@@ -57,6 +57,29 @@
  * The allowlist is deliberately by exact path and by rule. Widening it is a
  * visible, reviewable diff, which is the point.
  *
+ * A SERVER SOCKET IS NOT A CLIENT, and the one exemption below says so as a
+ * RULE rather than as another path on the allowlist. `node:http` is banned by
+ * specifier because importing it hands you `request` and `get`, and a renamed
+ * binding leaves no call the other rules would recognise. But the module also
+ * holds `createServer`, which cannot send anything anywhere: it accepts inbound
+ * connections and that is all it does. So an import from `node:http` whose
+ * bindings are ALL drawn from the small server-side list in
+ * `SERVER_ONLY_HTTP_BINDINGS` is not a client import.
+ *
+ * Why a rule and not an allowlist entry: an allowlist entry says "this FILE may
+ * name a client", which is exactly the wrong claim about a file that serves. It
+ * would also have to be re-granted for every process that ever binds a port, and
+ * each grant would carry the client rules along with it. The rule instead
+ * narrows what may be imported, everywhere, for everybody: `import http from
+ * "node:http"`, `import * as http from "node:http"`, `import { request } from
+ * "node:http"` and any binding not on the list are all still findings, in every
+ * file, and so is every other specifier - `node:net` and `node:tls` included,
+ * which is why the loopback stub server is still allowlisted for the socket type
+ * it imports.
+ *
+ * `test/unit/no-direct-http.test.ts` proves both halves against committed
+ * fixtures, because an exemption nobody showed can fail is a hole.
+ *
  * `test/unit/no-direct-http.test.ts` proves this check can FAIL before it
  * believes that it passes: it runs the same function over committed fixture
  * call sites that bypass the governor and asserts the findings, then runs it
@@ -297,6 +320,87 @@ const RULES: readonly Rule[] = [
   },
 ];
 
+/* -------------------------------------------------------------------------- */
+/* The one exemption: an import that can only serve                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Everything `node:http` exports that cannot put a request on the wire.
+ *
+ * `createServer` accepts connections. The rest are TYPES, which do not exist at
+ * run time at all. Deliberately absent, and each absence is the whole point:
+ * `request`, `get`, `Agent`, `ClientRequest`, and the default and namespace
+ * imports that reach all of them.
+ *
+ * Adding a name here is a change to what this repository considers incapable of
+ * sending, and it is a reviewable one-line diff for exactly that reason.
+ */
+export const SERVER_ONLY_HTTP_BINDINGS: readonly string[] = [
+  "createServer",
+  "Server",
+  "ServerOptions",
+  "ServerResponse",
+  "IncomingMessage",
+  "IncomingHttpHeaders",
+  "OutgoingHttpHeaders",
+  "RequestListener",
+];
+
+/** The rules a server-only import is exempt from, and no others. */
+const SERVER_IMPORT_EXEMPT_RULES = ["client-import", "client-module-literal"];
+
+/**
+ * A braced import from `node:http`, over however many lines it is written on.
+ * The specifier is pinned to `node:http` alone: no other module on the client
+ * list has a server in it, and widening this to a pattern would be widening the
+ * exemption to modules nobody has looked at.
+ */
+const BRACED_HTTP_IMPORT = /\bimport\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']node:http["']/g;
+
+/**
+ * The 1-based line numbers covered by an import from `node:http` that binds
+ * nothing but server-side names.
+ *
+ * Takes the COMMENT-STRIPPED view, so a sentence about such an import is not one.
+ */
+export function serverOnlyImportLines(source: string): Set<number> {
+  const exempt = new Set<number>();
+  // Offsets to line numbers, once, rather than per match.
+  const lineOf = (offset: number): number => {
+    let line = 1;
+    for (let index = 0; index < offset && index < source.length; index += 1) {
+      if (source[index] === "\n") line += 1;
+    }
+    return line;
+  };
+
+  BRACED_HTTP_IMPORT.lastIndex = 0;
+  let match: RegExpExecArray | null = BRACED_HTTP_IMPORT.exec(source);
+  while (match !== null) {
+    const bindings = match[1]
+      .split(",")
+      .map((binding) => binding.trim())
+      .filter((binding) => binding.length > 0)
+      // `X as Y` binds X. The local name is the author's; what matters is which
+      // export was reached for.
+      .map((binding) => binding.replace(/^type\s+/, "").split(/\s+as\s+/)[0].trim());
+
+    const serverOnly =
+      bindings.length > 0 &&
+      bindings.every((binding) => SERVER_ONLY_HTTP_BINDINGS.includes(binding));
+
+    if (serverOnly) {
+      const first = lineOf(match.index);
+      const last = lineOf(match.index + match[0].length);
+      for (let line = first; line <= last; line += 1) exempt.add(line);
+    }
+
+    match = BRACED_HTTP_IMPORT.exec(source);
+  }
+
+  return exempt;
+}
+
 /** The identifiers a computed access with a literal key is rewritten for. */
 const COMPUTED_ACCESS = [GLOBAL_CLIENT, TRANSPORT_FACTORY, ...SOCKET_CLIENTS].map(
   (identifier) => ({
@@ -371,12 +475,21 @@ export function findDirectHttpCallSites(
 
     const sourceLines = source.split("\n");
     const codeLines = code.split("\n");
+    // An import from `node:http` binding nothing but server-side names. Not an
+    // allowlisted FILE: a rule about what was imported, applied everywhere.
+    const serving = serverOnlyImportLines(source);
 
     sourceLines.forEach((line, index) => {
       for (const rule of RULES) {
         const subject = rule.scans === "code" ? (codeLines[index] ?? "") : line;
         if (!rule.pattern.test(subject)) continue;
         if (allowed !== undefined && allowed.rules.includes(rule.name)) continue;
+        if (
+          serving.has(index + 1) &&
+          SERVER_IMPORT_EXEMPT_RULES.includes(rule.name)
+        ) {
+          continue;
+        }
         findings.push({
           path: file.path,
           line: index + 1,
