@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": 403,
+    "message": "The API key is not valid, or the allocated call limit has been exceeded."
+  },
+  "requestedUrl": "https://api.bestbuy.com/v1/products/8880044.json?apiKey=fixture-api-key-do-not-use"
+}

@@ -1,7 +1,7 @@
 /**
  * The price history schema.
  *
- * Three tables, and all of them are load-bearing:
+ * Five tables, and all of them are load-bearing:
  *
  *   `price_observations`       one row per listing per run, kept indefinitely.
  *                              History accrues at one observation per listing
@@ -19,11 +19,23 @@
  *                              period have been sent. Durable because a crash
  *                              loop inside a period is exactly how a free
  *                              allowance gets burned twice.
+ *   `watchlist_entries`        the durable set of listings the system observes,
+ *                              per source, each entry enabled or disabled. A
+ *                              collection run reads this and NOTHING else to
+ *                              decide what to fetch.
+ *   `source_period_stops`      which sources are stopped for which allowance
+ *                              period because the source itself said the limit
+ *                              was exceeded, and whether the single
+ *                              notification for that stop has been sent.
+ *                              Durable for the same reason the allowance
+ *                              counter is: a restart inside the period must not
+ *                              be how a stopped source starts asking again.
  */
 
 import {
   bigint,
   bigserial,
+  boolean,
   check,
   index,
   integer,
@@ -31,6 +43,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -120,10 +133,21 @@ export const priceObservations = pgTable(
      * Enough of the parsed offer markup to debug a parser break, bounded to
      * RAW_CONTEXT_MAX_CHARS and to the same reduced markup the fixture
      * invariant requires.
+     *
+     * NULLABLE since SOURCE-3, and the nullability is the retention policy's
+     * only honest shape. A source whose terms cap how long its Content may be
+     * cached has that content DELETED once the ceiling passes, while the
+     * observation itself - price, currency, both instants, source and listing -
+     * is kept indefinitely, so the column has to be able to hold "there is no
+     * longer any raw content here". Writing an empty string instead would be a
+     * value pretending to be an absence, and neither the terms nor a later
+     * reader are served by that. Nothing in this system writes NULL here: the
+     * write path requires a string, so a NULL is always content this system
+     * aged out on purpose.
      */
     rawContext: varchar("raw_context", {
       length: RAW_CONTEXT_MAX_CHARS,
-    }).notNull(),
+    }),
 
     /**
      * The schema.org ItemAvailability token exactly as received, including one
@@ -218,7 +242,107 @@ export const governorAllowanceUsage = pgTable(
   ],
 );
 
+/**
+ * The watchlist: the durable set of listings the system observes.
+ *
+ * A collection run reads THIS and nothing else to decide what to fetch, which
+ * is what makes "attempted no listing that is absent from the watchlist" a
+ * property of the query rather than of somebody's care at a call site. An entry
+ * is keyed to the same per-listing natural key `price_observations.listing_id`
+ * carries, per source - for the sanctioned API that is the vendor's own SKU -
+ * so an observation is attributed by the key the watchlist asked for.
+ *
+ * `enabled` rather than a delete: switching a listing off and leaving its
+ * history in place is the ordinary thing an owner does, and a row that came
+ * back would otherwise lose why it was ever tracked.
+ */
+export const watchlistEntries = pgTable(
+  "watchlist_entries",
+  {
+    /** Surrogate key. The natural key of a row is (source, listing). */
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
+
+    /** Which source observes this listing, e.g. "bestbuy-api". */
+    sourceId: text("source_id").notNull(),
+
+    /**
+     * The listing, as the same natural key an observation is attributed by.
+     * Never a store id: `price_observations.store_id` is HARD-8's dimension and
+     * is not a listing key here either.
+     */
+    listingId: text("listing_id").notNull(),
+
+    /** False means a run attempts nothing for this entry, and issues nothing. */
+    enabled: boolean("enabled").notNull().default(true),
+
+    /** When the owner added it. Free text below says why. */
+    addedAt: timestamp("added_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+
+    /** The owner's own note. Never a credential, never a response body. */
+    note: text("note"),
+  },
+  (table) => [
+    // One entry per listing per source. Two rows for one listing would be two
+    // requests per run for one price, spent out of a metered allowance.
+    uniqueIndex("watchlist_entries_source_listing_key").on(
+      table.sourceId,
+      table.listingId,
+    ),
+    index("watchlist_entries_source_enabled_idx").on(table.sourceId, table.enabled),
+  ],
+);
+
+/**
+ * A source stopped for one allowance period because THE SOURCE said so.
+ *
+ * Distinct from `governor_allowance_usage.stopped_at`, and the distinction is
+ * the point: that column records this system reaching its OWN configured
+ * allowance, while a row here records the vendor answering 403 - documented by
+ * the sanctioned API's own error table as "the API key is not valid, or the
+ * allocated call limit has been exceeded". Only the vendor knows which of those
+ * it meant, and neither is fixed by asking again, so the answer to both is to
+ * stop that source for the period rather than retry it.
+ *
+ * Keyed by (source, period start) exactly as the allowance counter is, so a new
+ * period is a new row and no reset job has to exist. Durable because a crash
+ * loop inside the period is precisely when a stopped source would otherwise
+ * start asking again. `notified_at` holds "notify once" across that restart.
+ */
+export const sourcePeriodStops = pgTable(
+  "source_period_stops",
+  {
+    /** The source that was stopped, e.g. "bestbuy-api". */
+    sourceId: text("source_id").notNull(),
+    /** The instant the allowance period began, aligned to the epoch. */
+    periodStart: timestamp("period_start", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    /** When this system recorded the stop. */
+    stoppedAt: timestamp("stopped_at", { withTimezone: true, mode: "date" }).notNull(),
+    /**
+     * The condition, in words. Never a response body and never a credential:
+     * the vendor's key travels in a query string, so anything echoed back is
+     * redacted before it reaches this column.
+     */
+    reason: text("reason").notNull(),
+    /** When the single notification for this stop was emitted. */
+    notifiedAt: timestamp("notified_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    primaryKey({
+      name: "source_period_stops_pkey",
+      columns: [table.sourceId, table.periodStart],
+    }),
+  ],
+);
+
 export type PriceObservationRow = typeof priceObservations.$inferSelect;
 export type NewPriceObservationRow = typeof priceObservations.$inferInsert;
 export type InitializationMarkerRow = typeof historyInitialization.$inferSelect;
 export type GovernorAllowanceUsageRow = typeof governorAllowanceUsage.$inferSelect;
+export type WatchlistEntryRow = typeof watchlistEntries.$inferSelect;
+export type NewWatchlistEntryRow = typeof watchlistEntries.$inferInsert;
+export type SourcePeriodStopRow = typeof sourcePeriodStops.$inferSelect;

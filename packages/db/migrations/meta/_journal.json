@@ -15,6 +15,13 @@
       "when": 1787618798696,
       "tag": "0001_governor_2_allowance_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788653935540,
+      "tag": "0002_source_3_watchlist_and_retention",
+      "breakpoints": true
     }
   ]
 }

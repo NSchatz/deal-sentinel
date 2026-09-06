@@ -35,6 +35,8 @@ import {
   robotsAbsent,
   testConfig,
 } from "../support/governor-harness.ts";
+import { termsFor } from "@deal-sentinel/sources";
+
 import { FakeClock } from "../support/fake-clock.ts";
 
 const COMMITTED_CONFIG = fileURLToPath(
@@ -328,13 +330,29 @@ describe("the committed default configuration", () => {
     assert.match(text, /BRIEF\.md deliberately fixes no rate ceiling/);
   });
 
-  it("hard-codes no metered allowance for a source this phase cannot measure", () => {
-    // The spec's manifest carries a real vendor's published allowance as a
-    // worked example and says no number from it is hard-coded by this phase.
+  it("meters only a source whose own vendor publishes a limit to meter against", () => {
+    // GOVERNOR-2 asserted this file carried NO metered allowance at all, and
+    // the reason it gave was that its own phase had no source to read a
+    // published limit from: "no number from it is hard-coded by this phase".
+    // SOURCE-3 is the phase that reads one. So the invariant is no longer
+    // "there are none" - the committed file now meters the sanctioned API -
+    // but the thing that invariant protected, which is that no allowance here
+    // is a number somebody invented. Every metered source must be one this
+    // repository holds published terms for, and spec
+    // S0033-deal-sentinel-source-3's criterion 24 then checks the number
+    // itself against those terms.
     const config = loadGovernorConfig(COMMITTED_CONFIG);
-    const metered = Object.entries(config.sources).filter(
-      ([, settings]) => settings.allowance !== undefined,
-    );
-    assert.deepEqual(metered, []);
+    const metered = Object.entries(config.sources)
+      .filter(([, settings]) => settings.allowance !== undefined)
+      .map(([sourceId]) => sourceId);
+
+    for (const sourceId of metered) {
+      const terms = termsFor(sourceId);
+      assert.ok(
+        terms !== null && terms.documentedCallsPerDay !== null,
+        `${sourceId} carries a metered allowance and this repository holds no ` +
+          "published limit for it, so the number was invented",
+      );
+    }
   });
 });

@@ -26,17 +26,29 @@
       "One entry per hostname this system may contact, keyed by the lower-case",
       "hostname without a port. A host with no entry here is REFUSED: there is",
       "no default-permissive rate anywhere in the governor.",
-      "127.0.0.1 is the only host this repository contacts today - the test",
-      "harness's stub server and the local Postgres container are on it - and",
-      "loopback is owed no politeness, which is why its numbers are loose.",
-      "SOURCE-3 adds the first real host together with the ceiling that source's",
-      "own published terms and BRIEF.md constraint 4 justify."
+      "127.0.0.1 is the loopback host the test harness's stub server and the",
+      "local Postgres container sit on, and loopback is owed no politeness,",
+      "which is why its numbers are loose.",
+      "api.bestbuy.com is the first REAL host this system may contact. Its",
+      "vendor publishes 5 calls per second and 50,000 per day for the Products",
+      "family; the numbers below are one request every 2 seconds, which is a",
+      "tenth of the published rate. BRIEF.md constraint 4 asks for personal-use",
+      "volumes with jitter, and a household watching a few dozen listings needs",
+      "nothing faster. packages/sources refuses to run a source whose ceiling",
+      "here exceeds what its vendor published, so raising these is a change",
+      "that has to stay inside the vendor's own numbers."
     ],
     "127.0.0.1": {
       "maxRequests": 240,
       "intervalMs": 60000,
       "minDelayMs": 1,
       "jitterMs": 1
+    },
+    "api.bestbuy.com": {
+      "maxRequests": 1,
+      "intervalMs": 2000,
+      "minDelayMs": 2000,
+      "jitterMs": 500
     }
   },
 
@@ -92,13 +104,27 @@
       "A METERED source adds an allowance block:",
       "  \"allowance\": { \"limit\": <requests per period>, \"periodMs\": <period>,",
       "                  \"warnFraction\": <0..1> }",
-      "and the limit comes from THAT source's own published terms. No such",
-      "number is written here: this phase fetches no real source, and SOURCE-3",
-      "is where the sanctioned API's published allowance is read and adopted.",
-      "The two source ids below are the ones packages/shared already names on",
-      "the observation context."
+      "and the limit comes from THAT source's own published terms.",
+      "bestbuy-api's vendor publishes 50,000 calls per day. The limit below is",
+      "2,000 - four percent of it - because a household watching a few dozen",
+      "listings a few times a day needs nothing near the published number, and",
+      "a conservative cap is what stops a crash loop inside one period from",
+      "spending an allowance that does not come back until tomorrow. The",
+      "period is aligned to the epoch in 24-hour blocks, matching the way the",
+      "vendor states its limit. warnFraction is BRIEF.md section 5's",
+      "illustration and is configuration like every other number here.",
+      "packages/sources refuses to run a source whose allowance here exceeds",
+      "what its vendor published.",
+      "jsonld-generic stays unmetered: no adapter exists for it, so nothing",
+      "counts against it yet."
     ],
-    "bestbuy-api": {},
+    "bestbuy-api": {
+      "allowance": {
+        "limit": 2000,
+        "periodMs": 86400000,
+        "warnFraction": 0.8
+      }
+    },
     "jsonld-generic": {}
   }
 }

@@ -45,6 +45,56 @@ TypeScript on Node, PostgreSQL, Drizzle. Four packages behind
   that leaves against that source's allowance. Exactly one module in this
   repository may reach an HTTP client, and
   `test/unit/no-direct-http.test.ts` fails the suite if a second one appears.
+- `packages/sources` - the sources a price actually comes from: what each
+  source's published terms require, what the owner configured for it, the
+  adapters behind one common interface, the collection run over the watchlist,
+  the raw-content retention job, and the attribution a display or export path
+  must carry. Every adapter takes a `Governor` and reaches the network only
+  through it.
+
+## The first real source, and the terms it runs under
+
+One retailer publishes an official API, and this is the package that reads it.
+Three facts shape everything in it:
+
+- **The terms are part of the interface.** That vendor's terms cap how long its
+  Content may be cached at seventy-two hours, require its content to be
+  "clearly and conspicuously" attributed wherever it is shown, and publish a
+  rate limit of 5 calls per second and 50,000 per day whose documented answer to
+  an excess is a 403. All four are honoured in code, and what the TERMS say
+  lives in `packages/sources/src/terms.ts` - quoted, with its source beside it -
+  while what the OWNER chose lives in `config/sources.json`. They are separate
+  files on purpose: if both facts lived in one document, a source configured
+  with no retention ceiling and a source whose terms declare none would be
+  indistinguishable.
+- **The watchlist is the only input.** A collection run reads `watchlist_entries`
+  and nothing else to decide what to fetch, so "attempted no listing that is
+  absent from the watchlist" is a property of the query rather than of care at
+  a call site.
+- **The credential never leaves the request.** That vendor takes its API key in
+  the query string, so the key is in every URL - including the one the vendor
+  echoes back inside its own response body as `canonicalUrl`. Every string that
+  leaves the package is scrubbed twice: once for the secret itself, and once for
+  the query parameter whatever its value is. Nothing reaches a stored row, a
+  notification body or a log line.
+
+Two settings are DECLARATIONS rather than readings, because the vendor publishes
+neither anywhere: the ISO 4217 currency, which decides the minor-unit exponent
+and so decides the NUMBER and not just a label, and the source's IANA local time
+zone, which is stored beside every instant because a 90-day low is anchored to
+the retailer's local day, and which is also how a zone-less vendor timestamp
+becomes an instant at all. A source configured without either does not run.
+
+```sh
+pnpm sources:start-check   # checks config/sources.json against each source's
+                           # published terms, and config/governor.json's
+                           # ceilings and allowances against their published
+                           # rate limits, or refuses
+```
+
+Nothing in this repository makes a live request to that vendor - not a test, not
+CI, not a development session. Every criterion is graded against saved payloads
+in `test/fixtures/bestbuy/` and a stubbed transport.
 
 ## The governor, and why it exists before the second source does
 

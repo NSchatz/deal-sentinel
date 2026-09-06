@@ -1,0 +1,19 @@
+{
+  "total": 2,
+  "products": [
+    {
+      "sku": 8880044,
+      "name": "One",
+      "salePrice": 7.99,
+      "regularPrice": 9.99,
+      "onSale": true
+    },
+    {
+      "sku": 8880045,
+      "name": "Two",
+      "salePrice": 8.99,
+      "regularPrice": 9.99,
+      "onSale": true
+    }
+  ]
+}
