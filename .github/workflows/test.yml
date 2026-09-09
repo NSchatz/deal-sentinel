@@ -1,0 +1,77 @@
+name: test
+
+# The gate that makes a change prove itself, from spec S0062-deal-sentinel-ci-gate.
+#
+# This workflow exists to produce exactly ONE check run, named `test`, which the
+# default branch requires. Three of its properties are load-bearing, and each is
+# held by `test/unit/ci-workflows.test.ts` rather than by a reviewer's memory:
+#
+#   - It carries no path filter and no condition. A required context that is
+#     skipped or never scheduled reports nothing at all, and a required context
+#     reporting nothing leaves a pull request unmergeable forever - so a
+#     documentation-only change runs the whole suite too.
+#   - A green that SKIPPED a test is refused. Seven of the ten integration tests
+#     stand up a real PostgreSQL container and three of them skip themselves when
+#     the machine's Docker cannot start one, so a runner with no usable daemon
+#     would otherwise report a green that means far less than it appears to.
+#   - It receives no secret and a read-only token. Nothing in this suite reads a
+#     credential; a job holding one is a credential a fork's pull request can
+#     reach for.
+#
+# Every `uses:` below is a 40-character commit SHA with its human-readable
+# release beside it, per the umbrella's pinning-conventions P3, and
+# `test/unit/pinning.test.ts` scans this file for that property on every run.
+# The frozen install plus the workspace's `ignoreScripts: true` are P4.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# The automatic token, and nothing else. Every scope this block does not name is
+# withheld, so `contents: read` is the whole of what a job here can do.
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # GitHub runs this as `bash --noprofile --norc -eo pipefail`. The pipefail is
+    # the point: the test target below is piped into `tee`, and without it a
+    # failing suite would hand its step the exit status of `tee` and pass.
+    shell: bash
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          # The suite reads no credential and this job needs none afterwards.
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          # An exact version, because `package.json` carries no packageManager
+          # field: without this line nothing committed decides which pnpm a
+          # fresh machine resolves.
+          version: 11.25.0
+          run_install: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          # Above `engines.node`, and above the 22.18 line where Node strips
+          # types without a flag - which is not a nicety here, it is the only
+          # reason `node --test "*.test.ts"` runs at all.
+          node-version: 24.20.0
+
+      - name: Install exactly what the lockfile already names
+        run: pnpm install --frozen-lockfile
+
+      - name: Run the repository's full test target
+        run: pnpm run test 2>&1 | tee test-output.txt
+
+      - name: Refuse a green that skipped a test
+        run: node test/support/assert-no-skipped-tests.ts test-output.txt

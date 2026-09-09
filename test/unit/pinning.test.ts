@@ -12,12 +12,13 @@
  *      each asserted RED with the rule and the clause it breaks;
  *   2. the compliant counterpart of each, asserted GREEN, so the check is not
  *      simply refusing everything it is shown;
- *   3. the four files this repository actually resolves an image from, taken
- *      VERBATIM off disk, mutated to remove the pin, and asserted red - which
- *      is the only evidence that the pass over the real tree means anything;
- *   4. the two categories with no referent here, asserted ABSENT BY NAME
- *      rather than counted as scanned, and the refusal that fires when any
- *      other category stops producing references;
+ *   3. the four files this repository actually resolves an image from, and the
+ *      two committed workflows, taken VERBATIM off disk, mutated to remove the
+ *      pin, and asserted red - which is the only evidence that the pass over
+ *      the real tree means anything;
+ *   4. the one category with no referent here, asserted ABSENT BY NAME rather
+ *      than counted as scanned, and the refusal that fires when any other
+ *      category stops producing references;
  *   5. the tree as it stands, asserted clean, and asserted to have been read;
  *   6. the runtime refusal: a digestless override of either image variable is
  *      refused with status 3 before anything reaches docker.
@@ -399,6 +400,64 @@ describe("the four files this repository resolves an image from go red when unpi
     assert.match(findings[0].reference, /^typescript@/);
   });
 
+  it("reports a committed workflow whose action is named by a mutable tag", () => {
+    // The synthetic sample above proves the RULE. This proves it over the file
+    // this repository really commits, which is the only thing that establishes
+    // the pass over the real tree means anything: a scan that had stopped
+    // reaching `.github/workflows/` would accept this mutation in silence.
+    for (const workflow of [".github/workflows/test.yml", ".github/workflows/typecheck.yml"]) {
+      const file = committed(workflow);
+      const mutated = {
+        path: file.path,
+        // Every SHA becomes the mutable major tag its comment names.
+        text: file.text.replace(/@[0-9a-f]{40} # (v\d)[.\d]*/g, "@$1"),
+      };
+      assert.notEqual(mutated.text, file.text, `${workflow} carries no SHA-pinned action`);
+
+      const { findings } = scanPinning([mutated]);
+      assert.ok(findings.length > 0, `${workflow} names a mutable tag and nothing was reported`);
+      for (const finding of findings) {
+        assert.equal(finding.path, workflow);
+        assert.equal(finding.clause, "P3");
+        assert.equal(finding.rule, "action-sha-pin");
+        assert.ok(finding.line > 0, "a P3 finding must name the line it is on");
+        assert.match(finding.reference, /@v\d$/);
+      }
+
+      const described = describePinningFindings(findings);
+      assert.match(described, new RegExp(`${workflow.replace(/[./]/g, "\\$&")}:\\d+`));
+      assert.match(described, /P3 action-sha-pin/);
+    }
+  });
+
+  it("reports a committed workflow whose SHA pin lost its version comment", () => {
+    const file = committed(".github/workflows/test.yml");
+    const mutated = {
+      path: file.path,
+      text: file.text.replace(/(@[0-9a-f]{40}) # v[.\d]+/g, "$1"),
+    };
+    assert.notEqual(mutated.text, file.text);
+    const { findings } = scanPinning([mutated]);
+    assert.ok(findings.length > 0, describePinningFindings(findings));
+    for (const finding of findings) {
+      assert.equal(finding.clause, "P3");
+      assert.equal(finding.rule, "action-version-comment");
+    }
+  });
+
+  it("accepts both committed workflows exactly as they are", () => {
+    for (const workflow of [".github/workflows/test.yml", ".github/workflows/typecheck.yml"]) {
+      const { findings, categories } = scanPinning([committed(workflow)]);
+      assert.deepEqual(findings, [], describePinningFindings(findings));
+      const report = categories.find((entry) => entry.category === "workflow-uses");
+      assert.ok(
+        (report?.referencesFound ?? 0) >= 3,
+        `${workflow} produced ${report?.referencesFound} action reference(s); a ` +
+          "workflow the scan reads and finds nothing in is a pattern that stopped matching",
+      );
+    }
+  });
+
   it("reports the workspace file with lifecycle scripts turned back on", () => {
     const file = committed("pnpm-workspace.yaml");
     const mutated = {
@@ -433,17 +492,32 @@ describe("a category is never silently unexamined", () => {
     assert.equal(report("dockerfile-from").assertedAbsent, true);
   });
 
-  it("asserts by name that this repository carries no workflow", () => {
+  it("scans the committed workflows as a live category, rather than excusing them", () => {
+    // The positive form of what this case used to assert. Until
+    // S0062-deal-sentinel-ci-gate there was no `.github/` here and the category
+    // was excused by name; now the workflows exist, they are READ, and every
+    // action reference in them is graded like any other pin. Nothing in
+    // `collectPinningFiles` had to change to reach them - it already walked
+    // `.github/` - so this is the assertion that says the scanner is on.
     const workflows = collectPinningFiles(REPO_ROOT).filter((file) =>
       file.path.startsWith(".github/"),
     );
-    assert.deepEqual(workflows.map((file) => file.path), []);
-    assert.equal(report("workflow-uses").filesScanned, 0);
-    assert.equal(report("workflow-uses").assertedAbsent, true);
+    assert.deepEqual(
+      workflows.map((file) => file.path),
+      [".github/workflows/test.yml", ".github/workflows/typecheck.yml"],
+    );
+    assert.equal(report("workflow-uses").filesScanned, workflows.length);
+    assert.equal(report("workflow-uses").assertedAbsent, false);
+    assert.ok(
+      report("workflow-uses").referencesFound >= workflows.length,
+      `${report("workflow-uses").referencesFound} action reference(s) found across ` +
+        `${workflows.length} workflow(s): a workflow that resolves nothing is a ` +
+        "workflow this scan is no longer reading",
+    );
   });
 
-  it("names exactly those two as the categories legitimately empty here", () => {
-    assert.deepEqual([...EXPECTED_ABSENT_CATEGORIES], ["dockerfile-from", "workflow-uses"]);
+  it("names exactly that one as the category legitimately empty here", () => {
+    assert.deepEqual([...EXPECTED_ABSENT_CATEGORIES], ["dockerfile-from"]);
   });
 
   it("refuses every other category that produced nothing, naming it", () => {
@@ -499,6 +573,8 @@ describe("the tree as it stands is pinned everywhere it resolves anything", () =
       "packages/db/scripts/backup.sh",
       "packages/db/scripts/restore.sh",
       "test/support/postgres-container.ts",
+      ".github/workflows/test.yml",
+      ".github/workflows/typecheck.yml",
       "package.json",
       "packages/db/package.json",
       "packages/governor/package.json",
@@ -574,14 +650,29 @@ describe("the tree as it stands is pinned everywhere it resolves anything", () =
     );
   });
 
-  it("adds no .github directory, so nothing here asks a third party whether it is up", () => {
-    // P8, and the other half of AC-11: rot is discovered when a build fails,
-    // deliberately. A scheduled liveness check reds every unrelated pull
-    // request the day a registry has a bad afternoon.
-    assert.deepEqual(
-      collectPinningFiles(REPO_ROOT).filter((file) => file.path.startsWith(".github/")),
-      [],
+  it("asks no third party whether it is up, now that there IS a .github directory", () => {
+    // P8, unchanged in substance: rot is discovered when a build fails,
+    // deliberately, and a scheduled liveness check reds every unrelated pull
+    // request the day a registry has a bad afternoon. Until
+    // S0062-deal-sentinel-ci-gate this was assertable by there being no
+    // workflow at all. There are two now, so the claim is made against their
+    // triggers instead: neither runs on a clock.
+    const workflows = collectPinningFiles(REPO_ROOT).filter((file) =>
+      file.path.startsWith(".github/"),
     );
+    assert.ok(workflows.length > 0, "the gate's own workflows are no longer being read");
+    for (const workflow of workflows) {
+      assert.doesNotMatch(
+        workflow.text,
+        /^\s*schedule\s*:/m,
+        `${workflow.path} runs on a schedule (P8)`,
+      );
+      assert.doesNotMatch(
+        workflow.text,
+        /^\s*cron\s*:/m,
+        `${workflow.path} runs on a schedule (P8)`,
+      );
+    }
   });
 });
 

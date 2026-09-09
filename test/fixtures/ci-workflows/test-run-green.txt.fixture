@@ -1,0 +1,19 @@
+▶ a source whose failures cross its threshold is paused
+  ✔ refuses further requests for that source, naming the condition (48.918411ms)
+  ✔ emits exactly one notification however many requests arrive while paused (14.336219ms)
+  ✔ leaves every other source running, at that other source's own ceiling (20.866278ms)
+  ✔ serves the source again once the configured pause has elapsed (11.838712ms)
+  ✔ does not pause a source on too small a sample to have a rate (5.204954ms)
+✔ a source whose failures cross its threshold is paused (113.608581ms)
+▶ a pause reaches the requests already queued behind the ceiling
+  ✔ releases nothing further for a source paused while its requests waited (2.232662ms)
+  ✔ still serves a different source offered at the same time (1.771197ms)
+✔ a pause reaches the requests already queued behind the ceiling (4.466071ms)
+ℹ tests 7
+ℹ suites 2
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 881.438783

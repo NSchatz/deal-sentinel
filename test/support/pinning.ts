@@ -84,17 +84,21 @@ export const PINNING_CATEGORIES: readonly PinningCategory[] = [
 ];
 
 /**
- * The two categories with no referent in this repository at the pin this check
- * was written against. They are ASSERTED ABSENT by name rather than counted as
- * scanned: "there is no Dockerfile here" is a fact the check re-establishes
- * every run, and the rule that would apply to one is proved against a
- * committed sample instead. A repository that grows either is scanned like any
- * other, and the assertion in the test is the reviewable diff that says so.
+ * The categories with no referent in this repository. They are ASSERTED ABSENT
+ * by name rather than counted as scanned: "there is no Dockerfile here" is a
+ * fact the check re-establishes every run, and the rule that would apply to one
+ * is proved against a committed sample instead. A repository that grows one is
+ * scanned like any other, and the assertion in the test is the reviewable diff
+ * that says so.
+ *
+ * `workflow-uses` was on this list until S0062-deal-sentinel-ci-gate committed
+ * `.github/workflows/`. It is now a LIVE category: the workflows are scanned on
+ * every run, and the first action referenced by a mutable tag reds the suite
+ * rather than waiting to be noticed. `collectPinningFiles` needed no change to
+ * see them - it already walked `.github/` - so the retirement of this one name
+ * is the whole of what turned the scanner on.
  */
-export const EXPECTED_ABSENT_CATEGORIES: readonly PinningCategory[] = [
-  "dockerfile-from",
-  "workflow-uses",
-];
+export const EXPECTED_ABSENT_CATEGORIES: readonly PinningCategory[] = ["dockerfile-from"];
 
 /**
  * The image names this repository actually resolves, read wherever they are
