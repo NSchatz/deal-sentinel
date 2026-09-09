@@ -1,0 +1,3 @@
+# The compliant form: it says so, in one line, where an install reads it.
+registry=https://registry.npmjs.org/
+ignore-scripts=true

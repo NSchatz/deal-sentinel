@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#
+# The two shapes a shell script spells an image in, both unpinned.
+#
+# Environment:
+#   SAMPLE_PG_IMAGE        default postgres:16-alpine (this line is the one a
+#                          check anchored only on code positions walks straight
+#                          past, and it is a promise somebody keeps: an
+#                          operator reads it and exports exactly what it says)
+set -euo pipefail
+
+# 1. The binding the runner takes its image from.
+image="${SAMPLE_PG_IMAGE:-redis:7-alpine}"
+
+# 2. A literal handed straight to a container run, spread over continuations
+#    the way a real invocation is.
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  -v "${PWD}:/work" \
+  busybox:1.37 \
+  sh -c 'exec true'
+
+echo "$image"

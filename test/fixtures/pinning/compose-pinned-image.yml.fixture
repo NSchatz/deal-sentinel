@@ -1,0 +1,8 @@
+name: sample-stack
+
+# The same stack, pinned: tag AND digest. This one must PASS, or the check is
+# simply refusing everything it is shown.
+services:
+  cache:
+    image: redis:7-alpine@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    restart: unless-stopped

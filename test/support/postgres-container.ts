@@ -12,9 +12,29 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import pg from "pg";
 
+import { requirePinnedImage } from "./pinning.ts";
+
 const execFile = promisify(execFileCallback);
 
-export const POSTGRES_IMAGE = process.env.HISTORY_TEST_PG_IMAGE ?? "postgres:16-alpine";
+/**
+ * Tag AND digest, per `documentation/pinning-conventions.md` P1 in the SDD
+ * umbrella. The digest is the multi-architecture INDEX digest, so the same
+ * default works on an amd64 homelab host and an arm64 developer machine, and
+ * the restore proof is measured with the same PostgreSQL build every run.
+ * `docs/decisions/0005-container-image-pinning.md` says how to move it.
+ */
+export const DEFAULT_POSTGRES_IMAGE = "postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685";
+
+/**
+ * The image every integration container and the docker preflight below take.
+ * An override that carries no digest is REFUSED here, before anything reaches
+ * docker: a floating tag is a different server binary every time it resolves,
+ * and the restore proof is a claim about a specific one.
+ */
+export const POSTGRES_IMAGE = requirePinnedImage(
+  process.env.HISTORY_TEST_PG_IMAGE ?? DEFAULT_POSTGRES_IMAGE,
+  "HISTORY_TEST_PG_IMAGE",
+);
 
 export const DB_USER = "sentinel";
 export const DB_PASSWORD = "sentinel-test";

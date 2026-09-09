@@ -1,0 +1,9 @@
+packages:
+  - "packages/*"
+
+linkWorkspacePackages: true
+
+# pinning-conventions P4 opt-in: the native encoder in this workspace has no
+# prebuilt binary for linux/arm64, so its install script is the only way it
+# compiles. Reviewed 2026-09-09; revisit when a prebuild exists.
+ignoreScripts: false

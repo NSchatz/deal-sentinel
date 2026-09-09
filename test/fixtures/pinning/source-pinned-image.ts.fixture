@@ -1,0 +1,11 @@
+// The same constant, pinned, plus the two things beside it that must stay
+// unreported.
+
+export const SAMPLE_IMAGE = "redis:7-alpine@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+export const SAMPLE_HOST = "127.0.0.1:5432";
+export const SAMPLE_URL = "postgres://sentinel:secret@127.0.0.1:5432/history";
+
+export function describe(): string {
+  return `${SAMPLE_IMAGE} on ${SAMPLE_HOST}`;
+}

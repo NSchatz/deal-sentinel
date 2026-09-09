@@ -1,0 +1,13 @@
+// A source-level image constant with a readable tag and no digest, which is
+// where an integration harness's real container comes from.
+
+export const SAMPLE_IMAGE = process.env.SAMPLE_TEST_IMAGE ?? "redis:7-alpine";
+
+// A host and port, and a libpq URL. Neither is an image reference, and a check
+// that reports either is a check somebody switches off.
+export const SAMPLE_HOST = "127.0.0.1:5432";
+export const SAMPLE_URL = "postgres://sentinel:secret@127.0.0.1:5432/history";
+
+export function describe(): string {
+  return `${SAMPLE_IMAGE} on ${SAMPLE_HOST}`;
+}

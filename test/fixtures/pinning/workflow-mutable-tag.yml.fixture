@@ -1,0 +1,15 @@
+name: sample
+
+# Shape 3: an action named by a MUTABLE tag. `v4` is moved by its publisher
+# whenever they like, which is a supply-chain path straight into every build
+# this workflow runs.
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4.1.0
+        with:
+          node-version: 22

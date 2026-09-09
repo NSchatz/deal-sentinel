@@ -1,0 +1,6 @@
+# An .npmrc that appears and sets ignore-scripts NOWHERE AT ALL. It looks
+# harmless and it is not: it says nothing about lifecycle scripts, so whatever
+# the default is that day is what runs, and the workspace setting above it is
+# no longer the answer of record.
+registry=https://registry.npmjs.org/
+strict-peer-dependencies=false

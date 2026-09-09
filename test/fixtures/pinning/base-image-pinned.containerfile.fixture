@@ -1,0 +1,8 @@
+# The same build, pinned. `scratch` is not an image anybody resolves and is not
+# reported; the platform flag is not the reference either.
+FROM --platform=linux/amd64 node:22-bookworm@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef AS build
+WORKDIR /srv
+RUN echo "build steps"
+
+FROM scratch
+COPY --from=build /srv /srv
