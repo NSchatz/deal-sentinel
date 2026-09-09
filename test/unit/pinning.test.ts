@@ -286,7 +286,7 @@ describe("P1 is applied to the reference itself", () => {
     assert.equal(describeImagePin(`redis:7-alpine@${digest}`).pinned, true);
     // A registry port is not a tag, and a tag after a slash still is one.
     assert.equal(describeImagePin(`registry.local:5000/team/redis:7@${digest}`).pinned, true);
-    assert.equal(describeImagePin("redis:7-alpine").pinned, true);
+    assert.equal(describeImagePin("redis:7-alpine").pinned, false);
     assert.equal(describeImagePin(`redis@${digest}`).pinned, false);
     assert.equal(describeImagePin("redis:7-alpine@sha256:NOTHEX").pinned, false);
     assert.equal(describeImagePin(`redis:7-alpine@${digest.toUpperCase()}`).pinned, false);
