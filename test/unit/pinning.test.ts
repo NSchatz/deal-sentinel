@@ -529,12 +529,59 @@ describe("the tree as it stands is pinned everywhere it resolves anything", () =
   });
 
   it("reaches the same verdict twice, because it reads committed text and nothing else", () => {
-    // The property AC-11 is about, stated as a test: no clock, no daemon, no
-    // registry, so a machine with no route anywhere agrees with one that has.
     const first = checkRepositoryPinning(REPO_ROOT);
     const second = checkRepositoryPinning(REPO_ROOT);
     assert.deepEqual(first.findings, second.findings);
     assert.deepEqual(first.categories, second.categories);
+  });
+
+  it("reaches that same verdict in a process with every route to the network broken", () => {
+    // Not "it looks like it does not connect": a child process is given a
+    // proxy on a closed port for every scheme and an empty no-proxy list, so
+    // any attempt to leave this machine fails rather than succeeding quietly,
+    // and the verdict is compared against the one reached with a network.
+    const moduleUrl = new URL("../support/pinning.ts", import.meta.url).href;
+    const source =
+      `const pinning = await import(${JSON.stringify(moduleUrl)});\n` +
+      `const report = pinning.checkRepositoryPinning(${JSON.stringify(REPO_ROOT)});\n` +
+      "process.stdout.write(JSON.stringify(report.findings));\n";
+
+    const deadProxy = "http" + "://127.0.0.1:9";
+    const outcome = spawnSync(
+      process.execPath,
+      ["--no-warnings", "--input-type=module", "--eval", source],
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          http_proxy: deadProxy,
+          https_proxy: deadProxy,
+          HTTP_PROXY: deadProxy,
+          HTTPS_PROXY: deadProxy,
+          all_proxy: deadProxy,
+          no_proxy: "",
+          NO_PROXY: "",
+        },
+      },
+    );
+
+    assert.equal(outcome.status, 0, outcome.stderr);
+    assert.deepEqual(JSON.parse(outcome.stdout), []);
+    assert.deepEqual(
+      JSON.parse(outcome.stdout),
+      JSON.parse(JSON.stringify(checkRepositoryPinning(REPO_ROOT).findings)),
+    );
+  });
+
+  it("adds no .github directory, so nothing here asks a third party whether it is up", () => {
+    // P8, and the other half of AC-11: rot is discovered when a build fails,
+    // deliberately. A scheduled liveness check reds every unrelated pull
+    // request the day a registry has a bad afternoon.
+    assert.deepEqual(
+      collectPinningFiles(REPO_ROOT).filter((file) => file.path.startsWith(".github/")),
+      [],
+    );
   });
 });
 
