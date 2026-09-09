@@ -1,0 +1,9 @@
+name: sample-stack
+
+# Shape 1: a compose `image:` key with a readable tag and no digest. The tag
+# says 7-alpine today and says something else the week the publisher moves it,
+# and nothing here records which one this stack was proved against.
+services:
+  cache:
+    image: redis:7-alpine
+    restart: unless-stopped

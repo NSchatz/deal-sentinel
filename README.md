@@ -248,6 +248,14 @@ rather than beginning a new empty history. The volume is declared `external` in
 `docker-compose.yml`, so `docker compose down -v` cannot take the price history
 with it.
 
+The database image is pinned by tag AND digest everywhere it is named - the
+compose service, both database scripts, and the integration harness. The pin,
+where the digest came from, and the one command that re-resolves it are in
+`docs/decisions/0005-container-image-pinning.md`; `test/unit/pinning.test.ts`
+reds inside `pnpm test:unit` if a reference loses its digest, and an override
+of `HISTORY_PG_IMAGE` or `HISTORY_TEST_PG_IMAGE` that carries none is refused
+with exit status 3 rather than run.
+
 Backups:
 
 ```sh
@@ -255,6 +263,6 @@ HISTORY_DATABASE_URL=... pnpm db:backup                 # -> backups/....dump
 HISTORY_DATABASE_URL=... pnpm db:restore backups/....dump
 ```
 
-Both scripts run `pg_dump`/`pg_restore` from the postgres image when the client
-binaries are not installed on the host (`HISTORY_PG_RUNNER=docker`), which is
-the homelab case.
+Both scripts run `pg_dump`/`pg_restore` from the pinned postgres image when the
+client binaries are not installed on the host (`HISTORY_PG_RUNNER=docker`),
+which is the homelab case.

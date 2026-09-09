@@ -1,0 +1,9 @@
+packages:
+  - "packages/*"
+
+linkWorkspacePackages: true
+
+# Shape 6: lifecycle scripts turned back on, with no committed reason. A
+# dependency's post-install script runs as whoever ran the install, and this
+# line is the entire audit trail for that.
+ignoreScripts: false

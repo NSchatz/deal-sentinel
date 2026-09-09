@@ -1,0 +1,18 @@
+{
+  "name": "@deal-sentinel/sample",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "dependencies": {
+    "@deal-sentinel/shared": "*",
+    "@deal-sentinel/db": "workspace:*",
+    "pg": "8.13.1",
+    "drizzle-orm": "0.38.3"
+  },
+  "devDependencies": {
+    "typescript": "5.7.2"
+  }
+}

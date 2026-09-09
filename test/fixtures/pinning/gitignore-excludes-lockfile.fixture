@@ -1,0 +1,6 @@
+node_modules/
+*.tsbuildinfo
+
+# The lockfile is committed, unless something quietly says otherwise. A glob is
+# enough to do it, and nothing about the tree looks different afterwards.
+*-lock.yaml

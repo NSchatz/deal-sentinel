@@ -20,7 +20,13 @@
 #   HISTORY_DATABASE_URL   required. libpq URL of the database to restore INTO.
 #   HISTORY_PG_RUNNER      local | docker. Default: local when pg_restore is on
 #                          PATH, docker otherwise.
-#   HISTORY_PG_IMAGE       default postgres:16-alpine.
+#   HISTORY_PG_IMAGE       default
+#                          postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+#                          It must carry a tag AND an @sha256: digest: an
+#                          override with no digest is REFUSED with exit status 3
+#                          rather than run, because a floating tag is a
+#                          different pg_restore every time it resolves. See
+#                          docs/decisions/0005-container-image-pinning.md.
 #   HISTORY_PG_NETWORK     docker network to attach the runner container to.
 #
 # The URL is never written to a command line this script controls: the docker
@@ -72,7 +78,13 @@ case "$runner" in
       "${dump_dir}/${dump_name}"
     ;;
   docker)
-    image="${HISTORY_PG_IMAGE:-postgres:16-alpine}"
+    image="${HISTORY_PG_IMAGE:-postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685}"
+    if [[ "$image" != *"@sha256:"* ]]; then
+      echo "restore: HISTORY_PG_IMAGE supplied '${image}', which carries no @sha256: digest." >&2
+      echo "restore: pinning-conventions P1 - a container image is pinned by tag AND digest - so this refuses rather than restoring the history with an image whose contents nobody has named." >&2
+      echo "restore: supply the digest, as in HISTORY_PG_IMAGE=name:tag@sha256:<64 hex>. docs/decisions/0005-container-image-pinning.md says how to resolve one." >&2
+      exit 3
+    fi
     network_args=()
     if [[ -n "${HISTORY_PG_NETWORK:-}" ]]; then
       network_args=(--network "$HISTORY_PG_NETWORK")

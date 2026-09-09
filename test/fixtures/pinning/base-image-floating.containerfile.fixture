@@ -1,0 +1,12 @@
+# Shape 2: a base image with a readable tag and no digest. P2 is explicit that
+# a FROM line is an image reference like any other, and this is the category
+# this repository has no referent for today - so the rule is proved here
+# instead of being left as a comment about a file nobody has written yet.
+FROM node:22-bookworm AS build
+WORKDIR /srv
+RUN echo "build steps"
+
+# The second stage names the first BY STAGE NAME. That is not an image
+# reference and must not be reported as one.
+FROM build
+CMD ["node", "server.js"]
