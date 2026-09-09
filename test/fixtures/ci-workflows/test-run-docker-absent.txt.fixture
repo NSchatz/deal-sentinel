@@ -1,0 +1,9 @@
+﹣ an evaluation run writes and modifies no price observation (0.443538ms) # this machine's Docker cannot start a container, so a run's effect on real stored observations cannot be exercised here
+ℹ tests 0
+ℹ suites 1
+ℹ pass 0
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 726.146497
