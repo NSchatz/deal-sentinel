@@ -1,0 +1,5 @@
+// Nothing but prose, and far too few lines for the ratio to mean anything.
+// One comment line here moves the ratio by more than five points.
+// A file this short is noise, not a measurement.
+// The floor exists so the ceiling is never derived from noise.
+// Its ratio is one hundred and it is still excluded.

@@ -1,0 +1,20 @@
+// A line comment, which is prose.
+// A second one.
+
+/*
+ * A block comment, every line of which is prose.
+ */
+
+/**
+ * A JSDoc block, the same.
+ *
+ * @param value the thing
+ */
+export function narrate(value: string): string {
+  const answer = value.trim(); // a trailing comment leaves this line code
+  /* a block comment opened on a code line: */ return answer;
+}
+
+export const opened = 1; /* this block
+   spans three lines, and the two after the code
+   are prose */

@@ -1,41 +1,13 @@
 /**
- * The price history schema.
+ * The price history schema: six tables, all load-bearing.
  *
- * Six tables, and all of them are load-bearing:
- *
- *   `price_observations`       one row per listing per run, kept indefinitely.
- *                              History accrues at one observation per listing
- *                              per run and cannot be backfilled, so every
- *                              column the phase names is here now rather than
- *                              as a migration over the largest table in the
- *                              system later.
- *   `history_initialization`   the completed-initialization marker. Its
- *                              presence is what the ordinary start path checks;
- *                              its presence is also what the one-time
- *                              initialization action refuses to run past.
- *   `governor_allowance_usage` how much of a metered source's allowance the
- *                              current period has spent, and whether the one
- *                              warning and the one stop notification for that
- *                              period have been sent. Durable because a crash
- *                              loop inside a period is exactly how a free
- *                              allowance gets burned twice.
- *   `watchlist_entries`        the durable set of listings the system observes,
- *                              per source, each entry enabled or disabled. A
- *                              collection run reads this and NOTHING else to
- *                              decide what to fetch.
- *   `source_period_stops`      which sources are stopped for which allowance
- *                              period because the source itself said the limit
- *                              was exceeded, and whether the single
- *                              notification for that stop has been sent.
- *                              Durable for the same reason the allowance
- *                              counter is: a restart inside the period must not
- *                              be how a stopped source starts asking again.
- *   `alert_cooldowns`          when a rule last fired for a listing, so it does
- *                              not fire again inside its own cooldown. Durable
- *                              because a restart is otherwise how one alert
- *                              becomes an alert every time the container comes
- *                              back, which is the failure mode that kills tools
- *                              like this one.
+ * History accrues at one observation per listing per run and cannot be
+ * backfilled, so every column a phase names is here from its first migration
+ * rather than as a migration over the largest table in the system later.
+ * Durability is the other theme: the initialization marker, the allowance
+ * counter, the source stops and the alert cooldowns are all tables because a
+ * crash loop is otherwise how a free allowance gets burned twice and how one
+ * alert becomes an alert every time the container comes back.
  */
 
 import {
@@ -54,12 +26,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-/**
- * The bound on the raw-context column. Enough of the parsed offer markup to
- * debug a parser break, and no more: this phase has no live fetch, and the
- * fixture invariant (no review body, no reviewer name, no account identifier)
- * bounds what the column is ever allowed to hold as much as the length does.
- */
+/** Enough of the parsed offer markup to debug a parser break, and no more. */
 export const RAW_CONTEXT_MAX_CHARS = 8192;
 
 export const priceObservations = pgTable(
@@ -68,31 +35,26 @@ export const priceObservations = pgTable(
     /** Surrogate key. The natural key of a row is (source, listing, instant). */
     id: bigserial("id", { mode: "bigint" }).primaryKey(),
 
-    /** Which adapter produced this row, e.g. "bestbuy-api". */
     sourceId: text("source_id").notNull(),
 
     /**
-     * The listing this row observed, as a natural key - the tracked URL, or the
-     * source's own listing id. No watchlist table exists before SOURCE-3 to
-     * point at with a foreign key, so the natural key is the attribution. THIS
-     * is the per-listing key; `store_id` is not, and never becomes it.
+     * The tracked URL, or the source's own listing id. THIS is the per-listing
+     * key; `store_id` is not, and never becomes it.
      */
     listingId: text("listing_id").notNull(),
 
     /**
-     * Reserved for the store-scoped retail dimension HARD-8 adds ("the store it
-     * was observed for", distinct from the product). Nullable, and left
-     * unpopulated by this phase: no store-scoped source exists yet. It is not
-     * the per-listing key and a row is never attributed by it.
+     * Reserved for the store-scoped retail dimension HARD-8 adds, distinct from
+     * the product. Left unpopulated by this phase, and a row is never
+     * attributed by it.
      */
     storeId: text("store_id"),
 
     /**
-     * The price as an exact integer in the currency's own minor unit. `bigint`,
-     * because floating point is documented inexact and an all-time-low
-     * comparison is an equality, and because `numeric` would invite a decimal
-     * price back in. Scaled by the currency's ISO 4217 exponent, never by a
-     * fixed 100.
+     * An exact integer in the currency's own minor unit. `bigint`, because
+     * floating point is documented inexact and an all-time-low comparison is an
+     * equality, and because `numeric` would invite a decimal price back in.
+     * Scaled by the currency's ISO 4217 exponent, never by a fixed 100.
      */
     amountMinorUnits: bigint("amount_minor_units", { mode: "bigint" }).notNull(),
 
@@ -100,9 +62,8 @@ export const priceObservations = pgTable(
     currency: varchar("currency", { length: 3 }).notNull(),
 
     /**
-     * The timezone-aware instant of the observation. PostgreSQL stores this as
-     * UTC and does NOT retain the input zone, which is why the next column
-     * exists.
+     * PostgreSQL stores this as UTC and does NOT retain the input zone, which
+     * is why the next column exists.
      */
     observedAt: timestamp("observed_at", {
       withTimezone: true,
@@ -110,57 +71,43 @@ export const priceObservations = pgTable(
     }).notNull(),
 
     /**
-     * The source's own local time zone as an IANA name, stored beside the
-     * instant rather than re-derived from it. A 90-day low is anchored to the
-     * retailer's local day, and `timestamptz` cannot answer which day that was.
+     * An IANA name, stored beside the instant rather than re-derived from it: a
+     * 90-day low is anchored to the retailer's local day, and `timestamptz`
+     * cannot answer which day that was.
      */
     sourceTimeZone: text("source_time_zone").notNull(),
 
-    /**
-     * The vendor's own price-update timestamp where the source publishes one,
-     * null where it does not. SOURCE-3 records it beside the fetch instant.
-     */
+    /** Null where the source publishes no price-update timestamp of its own. */
     vendorPriceUpdatedAt: timestamp("vendor_price_updated_at", {
       withTimezone: true,
       mode: "date",
     }),
 
     /**
-     * How many hours this source's terms allow its raw content to be retained,
-     * null where the source declares no ceiling. Retention is a per-source
-     * property (Best Buy's terms cap cached Content at 72 hours while the brief
-     * wants history indefinitely), so it is a column on the row from the first
-     * migration rather than a migration over the largest table later. SOURCE-3
-     * enforces it; this phase only carries it.
+     * Null where the source declares no ceiling. Retention is a per-source
+     * property - Best Buy's terms cap cached Content at 72 hours while the
+     * brief wants history indefinitely - so it is a column from the first
+     * migration. SOURCE-3 enforces it; this phase only carries it.
      */
     rawContextRetentionHours: integer("raw_context_retention_hours"),
 
     /**
-     * Enough of the parsed offer markup to debug a parser break, bounded to
-     * RAW_CONTEXT_MAX_CHARS and to the same reduced markup the fixture
-     * invariant requires.
-     *
-     * NULLABLE since SOURCE-3, and the nullability is the retention policy's
-     * only honest shape. A source whose terms cap how long its Content may be
-     * cached has that content DELETED once the ceiling passes, while the
-     * observation itself - price, currency, both instants, source and listing -
-     * is kept indefinitely, so the column has to be able to hold "there is no
-     * longer any raw content here". Writing an empty string instead would be a
-     * value pretending to be an absence, and neither the terms nor a later
-     * reader are served by that. Nothing in this system writes NULL here: the
-     * write path requires a string, so a NULL is always content this system
-     * aged out on purpose.
+     * NULLABLE, and the nullability is the retention policy's only honest
+     * shape: a source whose terms cap how long its Content may be cached has
+     * that content DELETED once the ceiling passes, while the observation
+     * itself is kept indefinitely. An empty string would be a value pretending
+     * to be an absence. Nothing here writes NULL - the write path requires a
+     * string - so a NULL is always content this system aged out on purpose.
      */
     rawContext: varchar("raw_context", {
       length: RAW_CONTEXT_MAX_CHARS,
     }),
 
     /**
-     * The schema.org ItemAvailability token exactly as received, including one
-     * this system does not recognise. Never a boolean: ten of the twelve
-     * documented members are neither InStock nor OutOfStock. NULL means the
-     * markup declared no availability at all, which is not the same as a token
-     * whose meaning is unknown.
+     * The schema.org ItemAvailability token exactly as received, unrecognised
+     * ones included. Never a boolean: ten of the twelve documented members are
+     * neither InStock nor OutOfStock. NULL means the markup declared none,
+     * which is not the same as a token whose meaning is unknown.
      */
     availability: text("availability"),
   },
@@ -178,18 +125,15 @@ export const priceObservations = pgTable(
 );
 
 /**
- * The completed-initialization marker.
- *
  * One row, ever. Its presence means "this volume carries a history that was
- * deliberately initialized"; its absence means the ordinary start path must
- * refuse to start rather than begin a new empty history.
+ * deliberately initialized"; its absence means the ordinary start path refuses
+ * to start rather than beginning a new empty history.
  */
 export const historyInitialization = pgTable(
   "history_initialization",
   {
     /** Always 1. The check constraint below is what makes this a singleton. */
     id: integer("id").primaryKey(),
-    /** When the one-time initialization action completed. */
     initializedAt: timestamp("initialized_at", {
       withTimezone: true,
       mode: "date",
@@ -210,18 +154,16 @@ export const historyInitialization = pgTable(
  * The governor's allowance counter, one row per metered source per period.
  *
  * The primary key is (source, period start), so a new period is a new row and
- * "counting from zero for the new period" is a property of the key rather than
- * of a reset somebody has to remember to run. `warned_at` and `stopped_at` hold
- * the "exactly once per period" promise across a restart: an in-memory flag
- * would send the second warning at exactly the moment - a crash loop - when the
- * owner least needs two.
+ * counting from zero is a property of the key rather than of a reset somebody
+ * remembers to run. `warned_at` and `stopped_at` hold "exactly once per period"
+ * across a restart: an in-memory flag would send the second warning during a
+ * crash loop, exactly when the owner least needs two.
  */
 export const governorAllowanceUsage = pgTable(
   "governor_allowance_usage",
   {
-    /** The source the allowance belongs to, e.g. "bestbuy-api". */
     sourceId: text("source_id").notNull(),
-    /** The instant the current allowance period began, aligned to the epoch. */
+    /** Aligned to the epoch. */
     periodStart: timestamp("period_start", {
       withTimezone: true,
       mode: "date",
@@ -231,9 +173,9 @@ export const governorAllowanceUsage = pgTable(
      * error, a 403 and a block each consumed the allowance.
      */
     consumed: integer("consumed").notNull().default(0),
-    /** When the single warn-fraction notification for this period was emitted. */
+    /** When the single warn-fraction notification for this period went out. */
     warnedAt: timestamp("warned_at", { withTimezone: true, mode: "date" }),
-    /** When the single stop notification for this period was emitted. */
+    /** When the single stop notification for this period went out. */
     stoppedAt: timestamp("stopped_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [
@@ -249,18 +191,13 @@ export const governorAllowanceUsage = pgTable(
 );
 
 /**
- * The watchlist: the durable set of listings the system observes.
+ * The durable set of listings the system observes.
  *
  * A collection run reads THIS and nothing else to decide what to fetch, which
- * is what makes "attempted no listing that is absent from the watchlist" a
- * property of the query rather than of somebody's care at a call site. An entry
- * is keyed to the same per-listing natural key `price_observations.listing_id`
- * carries, per source - for the sanctioned API that is the vendor's own SKU -
- * so an observation is attributed by the key the watchlist asked for.
- *
- * `enabled` rather than a delete: switching a listing off and leaving its
- * history in place is the ordinary thing an owner does, and a row that came
- * back would otherwise lose why it was ever tracked.
+ * makes "attempted no listing absent from the watchlist" a property of the
+ * query rather than of care at a call site. `enabled` rather than a delete:
+ * switching a listing off and keeping its history is the ordinary thing an
+ * owner does, and a deleted row that came back would lose why it was tracked.
  */
 export const watchlistEntries = pgTable(
   "watchlist_entries",
@@ -268,32 +205,27 @@ export const watchlistEntries = pgTable(
     /** Surrogate key. The natural key of a row is (source, listing). */
     id: bigserial("id", { mode: "bigint" }).primaryKey(),
 
-    /** Which source observes this listing, e.g. "bestbuy-api". */
     sourceId: text("source_id").notNull(),
 
     /**
-     * The listing, as the same natural key an observation is attributed by.
-     * Never a store id: `price_observations.store_id` is HARD-8's dimension and
-     * is not a listing key here either.
+     * The same natural key an observation is attributed by. Never a store id:
+     * `price_observations.store_id` is HARD-8's dimension, not a listing key.
      */
     listingId: text("listing_id").notNull(),
 
     /**
-     * The link the OWNER supplied for this listing: the page they would open to
-     * buy it. Nullable, and the nullability is the honest shape - an entry added
-     * before this column existed carries no link, and there is no way to derive
-     * one. Nothing in this system fabricates it, and the adapter's own product
-     * URL is not a candidate: that is an API endpoint carrying a credential in
-     * its query string, and an alert is the one place that must never reach.
-     * An alert for a listing with no link is NOT SENT; the listing is reported
-     * by name instead.
+     * The link the OWNER supplied: the page they would open to buy it. An entry
+     * added before this column existed carries none, and nothing fabricates
+     * one. The adapter's own product URL is not a candidate - that is an API
+     * endpoint carrying a credential in its query string, and an alert is the
+     * one place that must never reach. An alert for a listing with no link is
+     * NOT SENT; the listing is reported by name instead.
      */
     listingUrl: text("listing_url"),
 
     /** False means a run attempts nothing for this entry, and issues nothing. */
     enabled: boolean("enabled").notNull().default(true),
 
-    /** When the owner added it. Free text below says why. */
     addedAt: timestamp("added_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -317,28 +249,20 @@ export const watchlistEntries = pgTable(
  *
  * Distinct from `governor_allowance_usage.stopped_at`, and the distinction is
  * the point: that column records this system reaching its OWN configured
- * allowance, while a row here records the vendor answering 403 - documented by
- * the sanctioned API's own error table as "the API key is not valid, or the
- * allocated call limit has been exceeded". Only the vendor knows which of those
- * it meant, and neither is fixed by asking again, so the answer to both is to
- * stop that source for the period rather than retry it.
- *
- * Keyed by (source, period start) exactly as the allowance counter is, so a new
- * period is a new row and no reset job has to exist. Durable because a crash
- * loop inside the period is precisely when a stopped source would otherwise
- * start asking again. `notified_at` holds "notify once" across that restart.
+ * allowance, while a row here records the vendor answering 403, documented as
+ * "the API key is not valid, or the allocated call limit has been exceeded".
+ * Only the vendor knows which it meant and neither is fixed by asking again.
+ * Keyed like the allowance counter, and durable for the same reason.
  */
 export const sourcePeriodStops = pgTable(
   "source_period_stops",
   {
-    /** The source that was stopped, e.g. "bestbuy-api". */
     sourceId: text("source_id").notNull(),
-    /** The instant the allowance period began, aligned to the epoch. */
+    /** Aligned to the epoch. */
     periodStart: timestamp("period_start", {
       withTimezone: true,
       mode: "date",
     }).notNull(),
-    /** When this system recorded the stop. */
     stoppedAt: timestamp("stopped_at", { withTimezone: true, mode: "date" }).notNull(),
     /**
      * The condition, in words. Never a response body and never a credential:
@@ -358,40 +282,30 @@ export const sourcePeriodStops = pgTable(
 );
 
 /**
- * When a rule last fired for a listing, so that it does not fire again inside
- * its own cooldown.
+ * When a rule last fired for a listing, so it does not fire again inside its
+ * own cooldown.
  *
- * DURABLE, and that is the whole point of it being a table. BRIEF.md section 7
- * names over-alerting as "the failure mode that kills these tools", and an
- * in-memory suppression is no suppression at all: a container that restarts
- * every few minutes would send the same alert every few minutes, which is
- * precisely the moment the owner stops reading them. `source_period_stops`
- * carries its once-only `notified_at` for the same reason.
- *
- * Keyed by (source, listing, rule) - the same per-listing natural key
- * `watchlist_entries` uses, plus the rule. A listing id means nothing without
- * its source, and two rules over one listing are two independent cooldowns.
- *
- * `fired_at` is the instant of the notification this system DELIVERED. A
- * delivery that failed writes nothing here, so a failed alert is retried on the
- * next run rather than being silently suppressed for a week.
+ * DURABLE, which is the whole point of it being a table: BRIEF.md section 7
+ * names over-alerting as "the failure mode that kills these tools", and a
+ * container restarting every few minutes would otherwise send the same alert
+ * every few minutes. Keyed by (source, listing, rule), because a listing id
+ * means nothing without its source and two rules over one listing are two
+ * independent cooldowns. `fired_at` is the instant of a notification this
+ * system DELIVERED, so a failed delivery is retried on the next run rather
+ * than silently suppressed for a week.
  */
 export const alertCooldowns = pgTable(
   "alert_cooldowns",
   {
-    /** The source the listing belongs to, e.g. "bestbuy-api". */
     sourceId: text("source_id").notNull(),
-    /** The listing, as the same natural key an observation is attributed by. */
     listingId: text("listing_id").notNull(),
     /** The rule that fired, as `config/alerts.json` names it. */
     ruleId: text("rule_id").notNull(),
-    /** When the notification this row suppresses was delivered. */
     firedAt: timestamp("fired_at", { withTimezone: true, mode: "date" }).notNull(),
     /**
-     * The observed price that fired it, in exact minor units, and its currency.
-     * Carried so an operator can see WHY a listing is quiet without joining
-     * back to the history. Never a credential and never a URL: an alert record
-     * is a place a pasted endpoint would otherwise come to rest.
+     * The price that fired it, carried so an operator can see WHY a listing is
+     * quiet without joining back to the history. Never a credential and never a
+     * URL: an alert record is where a pasted endpoint would come to rest.
      */
     amountMinorUnits: bigint("amount_minor_units", { mode: "bigint" }).notNull(),
     currency: varchar("currency", { length: 3 }).notNull(),

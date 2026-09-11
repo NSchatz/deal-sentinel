@@ -1,0 +1,3 @@
+export const before = 1;
+export const broken = "this string literal never closes;
+export const after = 2;
