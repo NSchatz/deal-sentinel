@@ -61,6 +61,26 @@ trim and was therefore not trimmed. The one file under the floor is
 generated output: this repository commits no generated TypeScript, and the
 exclusion exists for the day it does.
 
+## The ceiling
+
+| threshold | value | how it follows |
+|---|---|---|
+| ceiling | 50 | `roundup5(49.2)`: the smallest multiple of 5 at or above the maximum |
+| warn floor | 40 | the ceiling minus the ported band of 10 |
+| floor | 20 | one comment line in a shorter file moves the ratio by over 5 points |
+
+Committed in `config/comment-density.json`, and the suite refuses a ceiling
+above the cap, a warn floor that is not the ceiling minus the band, and a
+ceiling the maximum above does not derive. Two properties follow from that
+arithmetic and are what make this a ratchet rather than a demand: no file on
+the landed tree is above the ceiling, so the gate lands green; and the warn
+floor is below the maximum, so the worst file sits in the warn band and the
+band is not vacuous on the day it ships.
+
+Raising the ceiling means re-running the command above, showing a tree that
+justifies it, and staying under the cap. Nothing here stops prose that says
+WHY - 130 files carry it under this ceiling today.
+
 ## The trim set
 
 Every eligible file the measurement put above the cap, with the ratio it

@@ -1,0 +1,23 @@
+/**
+ * A file carrying more prose than the warn floor allows and less than the
+ * ceiling refuses. It is reported and the sweep still exits zero: the band is
+ * where a file is drifting, not where it has arrived.
+ */
+
+export type Budget = {
+  limit: number;
+  spent: number;
+};
+
+// Clamped at zero, because a caller reading "remaining" wants a quantity it
+// can act on rather than a debt it cannot.
+export function remaining(budget: Budget): number {
+  return Math.max(0, budget.limit - budget.spent);
+}
+
+// Spending past the limit is recorded as the limit: an allowance cannot go
+// further into deficit than the thing it is a limit on.
+export function spend(budget: Budget, amount: number): Budget {
+  const spent = Math.min(budget.limit, budget.spent + amount);
+  return { limit: budget.limit, spent };
+}
