@@ -37,23 +37,29 @@ code files between 64 and 85 percent.
 
 ## The measurement
 
+The tree as it stands, with the trim below already applied. This is the
+measurement a ceiling is derived from.
+
 | field | value |
 |---|---|
-| maximum ratio | 67.1 |
+| maximum ratio | 49.2 |
+| maximum ratio measured before the trim | 67.1 |
 | eligible files | 130 |
 | files under the floor | 1 |
 | files excluded | 0 |
 | floor | 20 |
-| commit measured | c4c88ebf572984e97ca086d861540122235904e9 |
+| commit measured | 8df4ae0c7167beda33f0680af5a3f0562a0aef0d |
 | command | pnpm run comment-density:report |
 
-That command prints the table below and the summary under it. It reads
-committed text, opens no connection and starts nothing, so it reaches the same
-numbers on any machine that can check the tree out.
+That command prints the table at the end of this file and the summary under it.
+It reads committed text, opens no connection and starts nothing, so it reaches
+the same numbers on any machine that can check the tree out.
 
-The one file under the floor is `packages/db/drizzle.config.ts`, at 16 counted
-lines. Nothing is excluded as generated output: this repository commits no
-generated TypeScript, and the exclusion exists for the day it does.
+The maximum is `tests/regress_0023_F1.ts`, which was under the cap before the
+trim and was therefore not trimmed. The one file under the floor is
+`packages/db/drizzle.config.ts`, at 16 counted lines. Nothing is excluded as
+generated output: this repository commits no generated TypeScript, and the
+exclusion exists for the day it does.
 
 ## The trim set
 
@@ -63,62 +69,70 @@ touched.
 
 | file | ratio before | ratio after |
 |---|---|---|
-| packages/sources/src/terms.ts | 67.1 | |
-| packages/alerts/src/clearance.ts | 66.7 | |
-| packages/alerts/src/redaction.ts | 65.5 | |
-| packages/shared/src/index.ts | 63.3 | |
-| tests/regress_0002_F6.ts | 62.7 | |
-| packages/governor/src/ports.ts | 59.7 | |
-| packages/db/src/schema.ts | 59.4 | |
-| packages/db/src/retention.ts | 59.2 | |
-| packages/sources/src/adapter.ts | 57.5 | |
-| packages/sources/src/credential.ts | 56.3 | |
-| packages/sources/src/retention.ts | 56.1 | |
-| tests/regress_0023_F11.ts | 55.2 | |
-| packages/governor/src/errors.ts | 55.1 | |
-| tests/regress_0002_F5.ts | 51.6 | |
-| tests/regress_0023_F12.ts | 50.6 | |
+| packages/sources/src/terms.ts | 67.1 | 47.1 |
+| packages/alerts/src/clearance.ts | 66.7 | 45.5 |
+| packages/alerts/src/redaction.ts | 65.5 | 47.3 |
+| packages/shared/src/index.ts | 63.3 | 41.0 |
+| tests/regress_0002_F6.ts | 62.7 | 46.8 |
+| packages/governor/src/ports.ts | 59.7 | 46.9 |
+| packages/db/src/schema.ts | 59.4 | 47.9 |
+| packages/db/src/retention.ts | 59.2 | 46.6 |
+| packages/sources/src/adapter.ts | 57.5 | 48.5 |
+| packages/sources/src/credential.ts | 56.3 | 46.2 |
+| packages/sources/src/retention.ts | 56.1 | 39.6 |
+| tests/regress_0023_F11.ts | 55.2 | 42.7 |
+| packages/governor/src/errors.ts | 55.1 | 46.3 |
+| tests/regress_0002_F5.ts | 51.6 | 35.2 |
+| tests/regress_0023_F12.ts | 50.6 | 40.9 |
+
+What went is the prose that restated the line under it: a field doc repeating
+the field name, a header retelling what each table's own block already said, a
+root cause quoted as source where naming the function reaches it. What stayed is
+the prose that says WHY - the vendor's own words where they are the provenance
+of a number, the reason a denylist replaces rather than filters, the reason
+retention is read off the row and not off today's configuration, and every
+finding a regression probe exists to record. The code view of all fifteen files,
+every comment range blanked, is byte for byte what it was before the trim.
 
 A comment in this repository is not inert text. `test/support/pinning.ts` reads
 the names in `KNOWN_IMAGE_NAMES` wherever they are written, comments included,
 and a name that appears nowhere is a finding of its own, so prose naming a
-container image is load-bearing and stays.
+container image is load-bearing and stays. No file in the trim set carried one.
 
 ## The distribution
 
 Every eligible file, worst first: ratio, comment lines over counted lines, path.
 
 ```
- 67.1    55/82    packages/sources/src/terms.ts
- 66.7    36/54    packages/alerts/src/clearance.ts
- 65.5   169/258   packages/alerts/src/redaction.ts
- 63.3    62/98    packages/shared/src/index.ts
- 62.7    42/67    tests/regress_0002_F6.ts
- 59.7    77/129   packages/governor/src/ports.ts
- 59.4   231/389   packages/db/src/schema.ts
- 59.2    45/76    packages/db/src/retention.ts
- 57.5    46/80    packages/sources/src/adapter.ts
- 56.3    63/112   packages/sources/src/credential.ts
- 56.1    37/66    packages/sources/src/retention.ts
- 55.2    53/96    tests/regress_0023_F11.ts
- 55.1    27/49    packages/governor/src/errors.ts
- 51.6    49/95    tests/regress_0002_F5.ts
- 50.6    40/79    tests/regress_0023_F12.ts
  49.2    61/124   tests/regress_0023_F1.ts
  48.8    21/43    packages/alerts/src/errors.ts
+ 48.5    32/66    packages/sources/src/adapter.ts
+ 47.9   145/303   packages/db/src/schema.ts
  47.6   138/290   packages/governor/src/allowance.ts
  47.4    55/116   tests/regress_0023_F9.ts
+ 47.3    80/169   packages/alerts/src/redaction.ts
+ 47.1    24/51    packages/sources/src/terms.ts
+ 46.9    46/98    packages/governor/src/ports.ts
+ 46.8    22/47    tests/regress_0002_F6.ts
  46.6    48/103   packages/governor/src/retry-after.ts
+ 46.6    27/58    packages/db/src/retention.ts
+ 46.3    19/41    packages/governor/src/errors.ts
+ 46.2    42/91    packages/sources/src/credential.ts
  45.9   329/716   packages/governor/src/governor.ts
+ 45.5    15/33    packages/alerts/src/clearance.ts
  44.3    43/97    packages/db/src/observations.ts
  44.2    69/156   tests/regress_0023_F2.ts
  44.0    40/91    packages/extractor/src/index.ts
+ 42.7    32/75    tests/regress_0023_F11.ts
  42.5   105/247   packages/alerts/src/channel.ts
  42.4    67/158   test/support/test-run-summary.ts
  42.3    90/213   packages/alerts/src/rules.ts
  41.2    28/68    packages/sources/src/errors.ts
+ 41.0    25/61    packages/shared/src/index.ts
+ 40.9    27/66    tests/regress_0023_F12.ts
  40.3    75/186   packages/governor/src/robots-parse.ts
  39.9    67/168   packages/sources/src/time-zone.ts
+ 39.6    19/48    packages/sources/src/retention.ts
  39.4    63/160   packages/sources/src/attribution.ts
  39.2    29/74    packages/governor/src/allowance-store-memory.ts
  38.5    20/52    test/support/assert-no-skipped-tests.ts
@@ -129,6 +143,7 @@ Every eligible file, worst first: ratio, comment lines over counted lines, path.
  36.2    79/218   packages/governor/src/robots.ts
  35.9    51/142   tests/regress_0023_F8.ts
  35.5    83/234   packages/sources/src/bestbuy/adapter.ts
+ 35.2    25/71    tests/regress_0002_F5.ts
  34.4    54/157   packages/governor/src/allowance-store-postgres.ts
  33.7    33/98    packages/governor/src/breaker.ts
  33.0    32/97    packages/sources/src/start-check.ts
