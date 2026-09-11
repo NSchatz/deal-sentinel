@@ -1,0 +1,14 @@
+export function Notice(): unknown {
+  return (
+    <section>
+      <p>// this is prose on a page, not a comment</p>
+      <p>/* and neither is this */</p>
+      <p>{"// a string in an expression container"}</p>
+      {/* braces are code, so this line is a code line */}
+      {
+        /* this line is nothing but comment */
+      }
+      <a href="https://example.com//docs">the documentation</a>
+    </section>
+  );
+}

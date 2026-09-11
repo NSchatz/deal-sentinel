@@ -1,0 +1,29 @@
+const documentation = "https://example.com/docs//index.html";
+const divider = "// not a comment, it is the contents of a string";
+const opener = "/* neither is this */";
+const template = `a /* not a comment */ b // nor this`;
+const anySlashPair = /[//]/;
+const escapedPair = /https:\/\//;
+const url = new URL("https://example.com//double-slash");
+
+export function describe(value: string): string {
+  const parts = [documentation, divider, opener, template, url.pathname];
+  if (anySlashPair.test(value)) {
+    parts.push("pair");
+  }
+  if (escapedPair.test(value)) {
+    parts.push("escaped");
+  }
+  return parts.join(" ");
+}
+
+export const shapes = {
+  documentation,
+  divider,
+  opener,
+  template,
+  anySlashPair,
+  escapedPair,
+};
+
+export const trailing = describe("//"); // code first, so this line is code

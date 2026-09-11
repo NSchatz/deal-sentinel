@@ -1,0 +1,5 @@
+export const before = 1;
+
+/* This block comment is never closed, so every line below it is swallowed.
+export const after = 2;
+export const alsoAfter = 3;

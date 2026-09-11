@@ -1,0 +1,35 @@
+/**
+ * A module that explains itself at length and does almost nothing.
+ *
+ * The prose here is the point. Every paragraph restates what the next line of
+ * code already says, in the voice of somebody who has been asked to document
+ * their work and has taken the instruction literally.
+ *
+ * It is kept in the tree so the ceiling has something to refuse, parked under
+ * the fixture extension so the sweep cannot read it as tree content.
+ */
+
+/** The separator. It separates. */
+export const SEPARATOR = ", ";
+
+/**
+ * Join the parts with the separator.
+ *
+ * @param parts the parts to join
+ * @returns the joined parts
+ */
+export function join(parts: readonly string[]): string {
+  // Join the parts.
+  return parts.join(SEPARATOR);
+}
+
+/**
+ * Split the value on the separator.
+ *
+ * @param value the value to split
+ * @returns the split value
+ */
+export function split(value: string): string[] {
+  // Split the value.
+  return value.split(SEPARATOR);
+}
