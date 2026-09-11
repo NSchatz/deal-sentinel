@@ -1,39 +1,30 @@
 /**
- * The ports the governor is built on, and the reason every one of them is a
- * port rather than an ambient call.
+ * The ports the governor is built on, and why every one of them is a port
+ * rather than an ambient call.
  *
- * The governor's whole job is to decide WHEN a request may leave the process.
- * A component that reads the wall clock, calls `Math.random()` or reaches an
- * HTTP client directly cannot be graded in bounded time and cannot be proven to
- * have no bypass. So: time, randomness, the transport and the notification sink
- * are all injected. The production wiring is in `transport.ts` (the one module
- * in this repository that may name an HTTP client) and in `system.ts`; every
- * test substitutes a fake and asserts against virtual time.
+ * The governor decides WHEN a request may leave the process. A component that
+ * reads the wall clock, calls `Math.random()` or reaches an HTTP client
+ * directly cannot be graded in bounded time and cannot be proven to have no
+ * bypass, so time, randomness, the transport and the notification sink are all
+ * injected. Production wiring is in `transport.ts` and `system.ts`.
  */
 
 /** Monotonic-enough time, injected so elapsed-time rules are gradeable. */
 export type Clock = {
   /** Milliseconds since the epoch. */
   now(): number;
-  /** Resolve after `ms` have elapsed on this clock. */
   sleep(ms: number): Promise<void>;
 };
 
-/**
- * A source of randomness in `[0, 1)`, injected for the same reason the clock
- * is: a jitter nobody can reproduce is a jitter nobody can grade.
- */
+/** In `[0, 1)`. A jitter nobody can reproduce is a jitter nobody can grade. */
 export type RandomSource = () => number;
 
 /**
- * What this system tells the outside world about, and nothing more.
- *
  * The first three are the governor's own conditions. The fourth is a SOURCE's:
- * a vendor that answers "the allocated call limit has been exceeded" has
- * stopped the source itself, and calling that `allowance-stop` would say this
- * system reached its own configured cap when it did not. The two conditions
- * want different actions from an operator - one is a local number to raise, the
- * other is a real refusal from a third party - so they are different words.
+ * a vendor answering "the allocated call limit has been exceeded" has stopped
+ * the source itself, and calling that `allowance-stop` would claim this system
+ * reached its own configured cap when it did not. One is a local number to
+ * raise, the other a refusal from a third party, so they are different words.
  */
 export type NotificationKind =
   | "breaker-paused"
@@ -43,7 +34,6 @@ export type NotificationKind =
 
 export type Notification = {
   kind: NotificationKind;
-  /** The source the notification is about. */
   sourceId: string;
   /** The instant on the injected clock, not on the wall clock. */
   at: Date;
@@ -51,11 +41,7 @@ export type Notification = {
   detail: string;
 };
 
-/**
- * The notification port. ALERT-4 owns the channel; this phase owns only the
- * promise that the governor emits exactly one notification per pause, per warn
- * and per stop, which is a counted call on a sink.
- */
+/** ALERT-4 owns the channel; this phase owns one notification per condition. */
 export type Notifier = {
   notify(notification: Notification): void | Promise<void>;
 };
@@ -65,19 +51,13 @@ export type TransportRequest = {
   method: string;
   headers: Record<string, string>;
   timeoutMs: number;
-  /**
-   * Stop reading the body after this many bytes. The robots gate passes its
-   * configured parsing limit here, so a hostile or enormous robots.txt is
-   * bounded at the socket rather than after it is already in memory.
-   */
+  /** Bounds a hostile robots.txt at the socket, not after it is in memory. */
   maxBytes: number;
   /**
-   * The REQUEST body, for the methods that carry one. Absent on every read this
-   * system makes: a price is fetched with a GET and a robots.txt is one too.
-   * A notification channel is the first caller that has something to say rather
-   * than something to ask, and it says it here - through the same six gates,
-   * because a channel that opened its own socket to carry a body would be the
-   * second way out of this process.
+   * Absent on every read this system makes. A notification channel is the first
+   * caller with something to say rather than to ask, and it says it here,
+   * through the same six gates: a channel that opened its own socket would be
+   * the second way out of this process.
    */
   body?: string;
 };
@@ -87,39 +67,29 @@ export type TransportResponse = {
   /** Header names lower-cased. Multiple values joined with ", " per RFC 9110. */
   headers: Record<string, string>;
   body: string;
-  /** True when the body was cut off at `maxBytes`. */
   truncated: boolean;
 };
 
 /**
- * The narrow port an HTTP client is reached through. Exactly one production
- * implementation exists (`transport.ts`), which is what makes "no path bypasses
- * the governor" a checkable property rather than a habit.
+ * One production implementation exists (`transport.ts`), which is what makes
+ * "no path bypasses the governor" checkable rather than a habit.
  */
 export type HttpTransport = {
   send(request: TransportRequest): Promise<TransportResponse>;
 };
 
 /**
- * What a caller writes when it wants the governor to use the real HTTP client.
- *
- * It is a MARKER, not a transport: it has no `send`, so holding it sends
- * nothing, and there is no way to turn it into a client except by handing it to
- * a `Governor`, which does so behind all six gates. That is the whole reason it
- * exists. An earlier shape of this package exported the factory itself, and a
- * caller could import that one name, call it, and issue a real request with no
- * ceiling, no delay, no robots decision, no back-pressure, no breaker and no
- * allowance. The factory is now internal to the package, and
- * `no-direct-http.ts` reports any file outside the governor that names it.
+ * A MARKER, not a transport: it has no `send`, so holding it sends nothing, and
+ * the only way to reach a client is to hand it to a `Governor`, which does so
+ * behind all six gates. Exporting the factory instead would let a caller import
+ * one name and issue a request with no ceiling, delay, robots decision,
+ * back-pressure, breaker or allowance.
  */
 export const LIVE_TRANSPORT: unique symbol = Symbol.for(
   "@deal-sentinel/governor#live-transport",
 );
 
-/**
- * Either a transport the caller supplies (every test that wants to assert on
- * what was sent without sending it) or the marker above.
- */
+/** A transport the caller supplies, for asserting on what was sent. */
 export type TransportChoice = HttpTransport | typeof LIVE_TRANSPORT;
 
 /** The wall clock and `Math.random`, for production wiring only. */
@@ -136,7 +106,6 @@ export const systemRandom: RandomSource = () => Math.random();
 /** A notifier that drops everything. ALERT-4 replaces it with a transport. */
 export const nullNotifier: Notifier = {
   notify() {
-    // Deliberately empty: this phase asserts what the governor emits, never
-    // what a channel promises.
+    // This phase asserts what the governor emits, never what a channel does.
   },
 };

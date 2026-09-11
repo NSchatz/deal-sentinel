@@ -1,36 +1,22 @@
 /**
  * regress_0002_F5 - impl-gate ordinal 2, spec S0002-deal-sentinel-history-1.
  *
- * Finding F5 (ADVISORY): the microdata reader matches an attribute by an
- * UNANCHORED name, so any attribute whose name merely ENDS with `content` or
- * `href` shadows the real one and donates its value to the offer.
+ * F5 (ADVISORY): the microdata reader matches an attribute by an UNANCHORED
+ * name, so any attribute whose name merely ENDS with `content` or `href`
+ * shadows the real one and donates its value to the offer.
  *
- * Root cause, `packages/extractor/src/offers.ts`:
+ * Root cause, `packages/extractor/src/offers.ts`: `attributeValue` builds a
+ * pattern from `\b` plus the name, and `\b` matches between `-` and `c`, so
+ * `data-content="99.00"` satisfies `\bcontent=` and `.exec` takes the FIRST
+ * match in the attribute text. The same hole exists for `href` (`data-href`),
+ * `itemprop` and `itemtype`. The offer's own stated price is then never read,
+ * and a different number reaches the price history with no typed failure and no
+ * visible gap.
  *
- *     function attributeValue(attributes: string, name: string): string | null {
- *       const match = new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, "i").exec(
- *         attributes,
- *       );
- *
- * `\b` matches between `-` and `c`, so `data-content="99.00"` satisfies
- * `\bcontent=`, and `.exec` takes the FIRST match in the attribute text. The
- * same hole exists for `href` (`data-href`), `itemprop` (`data-itemprop`) and
- * `itemtype` (`data-itemtype`).
- *
- * Consequence, and why it is the same SHAPE as the F1 defect this branch fixed:
- * the offer's own stated price is never read, and a different number is written
- * to the price history with no typed failure and no visible gap.
- *
- * Filed ADVISORY, not blocking. Acceptance criterion 1's trigger is an
- * extractor that "cannot resolve exactly one offer price and its ISO 4217
- * currency"; here exactly one price and one currency ARE resolved, so the
- * criterion is not breached on its face and the objection is a robustness
- * argument about a hand-rolled attribute matcher. The roadmap bounds this
- * phase's evidence to saved markup - "a green suite says the extractor is not
- * obviously wrong about markup somebody already saved" - and no committed
- * fixture carries a `data-content` attribute. Under decision 26 reasoning alone
- * does not block; the transcript is recorded here so it is checkable rather
- * than asserted, and SOURCE-3 or BREADTH-6 inherits it.
+ * Advisory rather than blocking: criterion 1 triggers on an extractor that
+ * cannot resolve one price and one currency, and here both ARE resolved. No
+ * committed fixture carries a `data-content` attribute. Recorded so it is
+ * checkable, and so SOURCE-3 or BREADTH-6 inherits it.
  *
  * Run: pnpm exec node --test tests/regress_0002_F5.ts
  */
@@ -40,13 +26,8 @@ import { describe, it } from "node:test";
 
 import { extractOffer } from "@deal-sentinel/extractor";
 
-/**
- * One offer, one stated price of 129.99. The price element also carries a
- * `data-content` attribute - the Bootstrap popover attribute, and a shape a
- * real retail template emits.
- *
- * Synthetic markup. No review body, no reviewer name, no account identifier.
- */
+/** Synthetic: one offer at 129.99, its price element also carrying the
+ * Bootstrap popover attribute `data-content`, a shape real templates emit. */
 const DATA_CONTENT_SHADOWS_CONTENT = `<!doctype html>
 <html lang="en">
   <body>
@@ -61,12 +42,7 @@ const DATA_CONTENT_SHADOWS_CONTENT = `<!doctype html>
   </body>
 </html>`;
 
-/**
- * The same hole on `href`. The offer declares availability with a real
- * `href="https://schema.org/InStock"`, and a `data-href` written before it wins.
- *
- * Synthetic markup. No review body, no reviewer name, no account identifier.
- */
+/** The same hole on `href`: a `data-href` written before the real one wins. */
 const DATA_HREF_SHADOWS_HREF = `<!doctype html>
 <html lang="en">
   <body>

@@ -1,40 +1,27 @@
 /**
  * regress_0023_F12 - impl-gate ordinal 4, spec S0023-deal-sentinel-governor-2.
  *
- * Finding F12 (advisory): the repository-wide scan never reads a directory
- * named `dist`, `build` or `coverage`, at ANY depth, so a call site under one
- * of those names is not "anywhere in the tree" as far as the check is
- * concerned. `packages/adapters/src/build/client.ts` is an ordinary path and it
- * is invisible.
+ * F12 (advisory): the repository-wide scan never reads a directory named
+ * `dist`, `build` or `coverage` at ANY depth, so a call site under one of those
+ * names is not "anywhere in the tree" as far as the check is concerned.
+ * `packages/adapters/src/build/client.ts` is an ordinary path and it is
+ * invisible.
  *
- * Acceptance criterion 2 (spec.md):
+ * Acceptance criterion 2: "WHEN a call site that issues an outbound HTTP
+ * request outside the governor is introduced ANYWHERE IN THE TREE THE SYSTEM
+ * SHALL fail a check that runs as part of `pnpm run test`."
  *
- *   WHEN a call site that issues an outbound HTTP request outside the governor
- *   is introduced ANYWHERE IN THE TREE THE SYSTEM SHALL fail a check that runs
- *   as part of `pnpm run test`.
+ * Root cause, `packages/governor/src/no-direct-http.ts`: the skip list is
+ * matched on the BASENAME rather than on a repository-relative path, so the
+ * exclusion is not "the generated output at the root" but "any directory
+ * anywhere with one of these names". This repository builds with `tsc --noEmit`
+ * and produces none of them today, which is exactly why the hole is silent.
  *
- * Root cause, `packages/governor/src/no-direct-http.ts`:
- *
- *   const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", "dist",
- *     "build", "coverage"]);
- *   ...
- *   for (const entry of readdirSync(directory).sort()) {
- *     if (SKIPPED_DIRECTORIES.has(entry)) continue;
- *
- * The name is matched on the basename, not on a repository-relative path, so
- * the exclusion is not "the generated output at the root" but "any directory
- * anywhere with one of these three names". This repository has a `tsc
- * --noEmit` build and produces none of them today, which is exactly why the
- * hole is silent: nothing in the suite would notice it opening.
- *
- * Filed ADVISORY rather than blocking: it takes a source directory with a
- * generated-output name before it bites, which is a naming accident rather
- * than a bypass anybody reaches for. It is recorded because unlike the
- * masking limitation the module header states, this one is not written down
- * anywhere, and because the fix is one line - skip those names only at the
- * repository root, or skip nothing that git tracks.
- *
- * This file documents the behaviour. Fixing it is the implementer's job.
+ * Advisory rather than blocking: it takes a source directory with a
+ * generated-output name before it bites, a naming accident rather than a bypass
+ * anybody reaches for. Recorded because it is written down nowhere else, and
+ * the fix is one line - skip those names only at the repository root. Fixing it
+ * is the implementer's job.
  */
 
 import assert from "node:assert/strict";
