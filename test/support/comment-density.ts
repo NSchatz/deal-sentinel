@@ -29,11 +29,31 @@ import type { ScannedFile } from "./pinning.ts";
 export const CAP = 50;
 export const BAND = 10;
 
-export type CommentDensityRule = "read-failed" | "tokenize-failed";
+export type CommentDensityRule =
+  | "read-failed"
+  | "tokenize-failed"
+  | "over-ceiling"
+  | "empty-eligible-set"
+  | "ceiling-over-cap"
+  | "warn-floor-band"
+  | "ceiling-not-derived"
+  | "record-command"
+  | "record-commit"
+  | "record-trim-set"
+  | "record-trim-file";
 
 export const COMMENT_DENSITY_RULES: readonly CommentDensityRule[] = [
   "read-failed",
   "tokenize-failed",
+  "over-ceiling",
+  "empty-eligible-set",
+  "ceiling-over-cap",
+  "warn-floor-band",
+  "ceiling-not-derived",
+  "record-command",
+  "record-commit",
+  "record-trim-set",
+  "record-trim-file",
 ];
 
 export type CommentDensityFinding = {
@@ -70,12 +90,17 @@ export type EligibilityConfig = {
   generatedMarker: string;
 };
 
-export const ELIGIBILITY_DEFAULTS: EligibilityConfig = {
-  floor: 20,
-  extensions: [".ts", ".mts", ".cts", ".tsx"],
-  excludedPaths: [],
-  generatedMarker: "@generated",
+/** The eligible set, plus the two thresholds derived from a measurement. */
+export type CommentDensityConfig = EligibilityConfig & {
+  ceiling: number;
+  warnFloor: number;
 };
+
+export const CONFIG_PATH = "config/comment-density.json";
+export const RECORD_PATH = "docs/decisions/0006-comment-density.md";
+export const REPORT_COMMAND = "pnpm run comment-density:report";
+export const EMPTY_TRIM_SENTENCE =
+  "the measured over-ceiling set is empty; no file was trimmed";
 
 /** A file the tokenizer refused. Never scored: a refusal is not zero prose. */
 export class CommentScanError extends Error {
@@ -392,4 +417,324 @@ export function describeMeasurements(measurements: readonly FileMeasurement[]): 
         measurement.path,
     )
     .join("\n");
+}
+
+/* ------------------------------------------------------------------ *
+ * The committed configuration
+ * ------------------------------------------------------------------ */
+
+function numberField(source: Record<string, unknown>, name: string): number {
+  const value = source[name];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${CONFIG_PATH} carries no numeric "${name}"`);
+  }
+  return value;
+}
+
+function stringsField(source: Record<string, unknown>, name: string): string[] {
+  const value = source[name];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new Error(`${CONFIG_PATH} carries no string list "${name}"`);
+  }
+  return value as string[];
+}
+
+export function readCommentDensityConfig(rootDir: string): CommentDensityConfig {
+  const text = readFileSync(path.join(rootDir, CONFIG_PATH), "utf8");
+  const parsed: unknown = JSON.parse(text);
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error(`${CONFIG_PATH} is not a JSON object`);
+  }
+  const source = parsed as Record<string, unknown>;
+  const marker = source["generatedMarker"];
+  if (typeof marker !== "string") {
+    throw new Error(`${CONFIG_PATH} carries no string "generatedMarker"`);
+  }
+  return {
+    floor: numberField(source, "floor"),
+    ceiling: numberField(source, "ceiling"),
+    warnFloor: numberField(source, "warnFloor"),
+    extensions: stringsField(source, "extensions"),
+    excludedPaths: stringsField(source, "excludedPaths"),
+    generatedMarker: marker,
+  };
+}
+
+/** The smallest multiple of 5 at or above `value`. */
+export function roundUpToFive(value: number): number {
+  const rounded = Math.ceil((value - 1e-9) / 5) * 5;
+  return rounded === 0 ? 0 : rounded;
+}
+
+/** Exact: the ratio is a fraction, and a comparison on it must not round. */
+function over(measurement: FileMeasurement, threshold: number): boolean {
+  return measurement.commentLines * 100 > threshold * measurement.countedLines;
+}
+
+/**
+ * The bounds the committed thresholds may not break. Checked rather than
+ * trusted, because the derivation is what stops a ceiling being raised to meet
+ * whatever the tree happens to carry today.
+ */
+export function findThresholdFindings(
+  config: CommentDensityConfig,
+): CommentDensityFinding[] {
+  const findings: CommentDensityFinding[] = [];
+  if (config.ceiling > CAP) {
+    findings.push({
+      path: CONFIG_PATH,
+      rule: "ceiling-over-cap",
+      reference: String(config.ceiling),
+      message:
+        `commits a ceiling of ${config.ceiling} points, over the cap of ${CAP}. ` +
+        "The cap is ported rather than derived, so no measurement of this tree " +
+        "can raise a ceiling past it.",
+    });
+  }
+  if (config.warnFloor !== config.ceiling - BAND) {
+    findings.push({
+      path: CONFIG_PATH,
+      rule: "warn-floor-band",
+      reference: String(config.warnFloor),
+      message:
+        `commits a warn floor of ${config.warnFloor}, which is not the ceiling ` +
+        `of ${config.ceiling} minus the band of ${BAND}. A band that is not the ` +
+        "ported one is a warning that fires somewhere nobody decided.",
+    });
+  }
+  return findings;
+}
+
+export type CommentDensityReport = {
+  measurements: FileMeasurement[];
+  /** Above the warn floor and at or below the ceiling: reported, not refused. */
+  warnings: FileMeasurement[];
+  belowFloor: FileMeasurement[];
+  excluded: Exclusion[];
+  findings: CommentDensityFinding[];
+};
+
+/** The whole check over a real tree: the eligible set, then the thresholds. */
+export function checkCommentDensity(
+  rootDir: string,
+  config: CommentDensityConfig,
+): CommentDensityReport {
+  const collected = collectCommentDensityFiles(rootDir, config);
+  const measured = measureFiles(collected.files, config);
+  const findings = [
+    ...collected.findings,
+    ...measured.findings,
+    ...findThresholdFindings(config),
+  ];
+
+  for (const measurement of measured.measurements) {
+    if (!over(measurement, config.ceiling)) continue;
+    findings.push({
+      path: measurement.path,
+      rule: "over-ceiling",
+      reference: measurement.ratio.toFixed(1),
+      message:
+        `${measurement.path} is ${measurement.ratio.toFixed(1)} percent prose ` +
+        `(${measurement.commentLines} comment lines of ${measurement.countedLines} ` +
+        `counted), over the committed ceiling of ${config.ceiling}. Say why once ` +
+        "and delete the rest.",
+    });
+  }
+
+  if (measured.measurements.length === 0) {
+    findings.push({
+      path: "",
+      rule: "empty-eligible-set",
+      reference: rootDir,
+      message:
+        "the eligible set is EMPTY, so this check has stopped looking rather " +
+        "than found nothing over the ceiling. Either a path moved or an " +
+        "exclusion widened; a clean sweep and a sweep that read nothing are " +
+        "indistinguishable from their exit status alone.",
+    });
+  }
+
+  return {
+    measurements: measured.measurements,
+    warnings: measured.measurements.filter(
+      (measurement) =>
+        over(measurement, config.warnFloor) && !over(measurement, config.ceiling),
+    ),
+    belowFloor: measured.belowFloor,
+    excluded: measured.excluded,
+    findings,
+  };
+}
+
+/** The summary that tells a clean sweep apart from a sweep that never ran. */
+export function summariseCommentDensity(
+  report: CommentDensityReport,
+  config: CommentDensityConfig,
+): string {
+  const worst = report.measurements[0];
+  return (
+    `comment-density: ${report.measurements.length} eligible file(s) swept, ` +
+    `ceiling ${config.ceiling} points, warn floor ${config.warnFloor}, ` +
+    `floor ${config.floor} counted lines, ` +
+    `${report.belowFloor.length} file(s) under the floor, ` +
+    `${report.excluded.length} excluded, ` +
+    `${report.warnings.length} in the warn band` +
+    (worst === undefined ? "" : `, worst ${worst.ratio.toFixed(1)} on ${worst.path}`)
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * The committed record
+ * ------------------------------------------------------------------ */
+
+function tableCells(line: string): string[] {
+  return line.split("|").map((cell) => cell.trim());
+}
+
+/** The value of a `| label | value |` row, matched on the whole label. */
+export function recordField(recordText: string, label: string): string | null {
+  for (const line of recordText.split("\n")) {
+    const cells = tableCells(line);
+    if (cells.length >= 4 && cells[1] === label) return cells[2];
+  }
+  return null;
+}
+
+function sectionOf(recordText: string, heading: string): string {
+  const lines = recordText.split("\n");
+  const start = lines.findIndex((line) => line.trim() === heading);
+  if (start === -1) return "";
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => line.startsWith("## "));
+  return (end === -1 ? rest : rest.slice(0, end)).join("\n");
+}
+
+export type TrimRow = { path: string; before: number };
+
+/** The trim set as the record lists it: a path and the ratio it carried. */
+export function recordTrimRows(recordText: string): TrimRow[] {
+  const rows: TrimRow[] = [];
+  for (const line of sectionOf(recordText, "## The trim set").split("\n")) {
+    const cells = tableCells(line);
+    if (cells.length < 4) continue;
+    const before = Number(cells[2]);
+    if (!cells[1].endsWith(".ts") || !Number.isFinite(before)) continue;
+    rows.push({ path: cells[1], before });
+  }
+  return rows;
+}
+
+/**
+ * The record graded against the tree it describes: the ceiling follows from the
+ * maximum it states, it names the command and the commit that reproduce it, and
+ * every file it says was trimmed is now at or below the cap.
+ */
+export function findRecordFindings(
+  recordText: string,
+  config: CommentDensityConfig,
+  measurements: readonly FileMeasurement[],
+): CommentDensityFinding[] {
+  const findings: CommentDensityFinding[] = [];
+  const stated = recordField(recordText, "maximum ratio");
+  const maximum = stated === null ? Number.NaN : Number(stated);
+
+  if (!Number.isFinite(maximum)) {
+    findings.push({
+      path: RECORD_PATH,
+      rule: "ceiling-not-derived",
+      reference: stated ?? "",
+      message:
+        "states no maximum ratio, so the committed ceiling follows from " +
+        "nothing anybody can re-derive.",
+    });
+  } else if (roundUpToFive(maximum) !== config.ceiling) {
+    findings.push({
+      path: RECORD_PATH,
+      rule: "ceiling-not-derived",
+      reference: stated ?? "",
+      message:
+        `states a maximum of ${maximum}, whose smallest multiple of 5 at or ` +
+        `above is ${roundUpToFive(maximum)}, while ${CONFIG_PATH} commits a ` +
+        `ceiling of ${config.ceiling}. A ceiling that is not the derivation is ` +
+        "a number somebody picked.",
+    });
+  }
+
+  if (!recordText.includes(REPORT_COMMAND)) {
+    findings.push({
+      path: RECORD_PATH,
+      rule: "record-command",
+      reference: REPORT_COMMAND,
+      message:
+        `names no command that reproduces its numbers. "${REPORT_COMMAND}" is ` +
+        "what turns the measurement into something checkable rather than quoted.",
+    });
+  }
+
+  const commit = recordField(recordText, "commit measured");
+  if (commit === null || !/^[0-9a-f]{40}$/.test(commit)) {
+    findings.push({
+      path: RECORD_PATH,
+      rule: "record-commit",
+      reference: commit ?? "",
+      message:
+        "names no commit it measured, so the numbers above belong to a tree " +
+        "nobody can check out.",
+    });
+  }
+
+  const rows = recordTrimRows(recordText);
+  if (rows.length === 0 && !recordText.includes(EMPTY_TRIM_SENTENCE)) {
+    findings.push({
+      path: RECORD_PATH,
+      rule: "record-trim-set",
+      reference: "",
+      message:
+        "lists no trim set file by file and does not say, in those words, " +
+        `"${EMPTY_TRIM_SENTENCE}". One of the two is what makes the trim a ` +
+        "measurement rather than an edit somebody made.",
+    });
+  }
+
+  const byPath = new Map(measurements.map((measurement) => [measurement.path, measurement]));
+  for (const row of rows) {
+    const measurement = byPath.get(row.path);
+    if (measurement === undefined) {
+      findings.push({
+        path: row.path,
+        rule: "record-trim-file",
+        reference: row.before.toFixed(1),
+        message:
+          `is listed in the trim set and is not in the eligible set at all, so ` +
+          "the record describes a tree this one is not.",
+      });
+      continue;
+    }
+    if (!over(measurement, CAP)) continue;
+    findings.push({
+      path: row.path,
+      rule: "record-trim-file",
+      reference: measurement.ratio.toFixed(1),
+      message:
+        `was trimmed from ${row.before.toFixed(1)} and is still ` +
+        `${measurement.ratio.toFixed(1)} percent prose, over the cap of ${CAP}.`,
+    });
+  }
+
+  return findings;
+}
+
+/** The record as committed, or a read failure rather than a silent pass. */
+export function checkCommittedRecord(
+  rootDir: string,
+  config: CommentDensityConfig,
+  measurements: readonly FileMeasurement[],
+): CommentDensityFinding[] {
+  let text: string;
+  try {
+    text = readFileSync(path.join(rootDir, RECORD_PATH), "utf8");
+  } catch (error) {
+    return [readFailure(RECORD_PATH, error)];
+  }
+  return findRecordFindings(text, config, measurements);
 }

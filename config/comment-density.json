@@ -1,0 +1,8 @@
+{
+  "floor": 20,
+  "ceiling": 50,
+  "warnFloor": 40,
+  "extensions": [".ts", ".mts", ".cts", ".tsx"],
+  "excludedPaths": [],
+  "generatedMarker": "@generated"
+}

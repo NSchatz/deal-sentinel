@@ -8,42 +8,39 @@
  *
  * Statuses:
  *   0  the sweep read the tree and printed the distribution
- *   1  a path could not be read, or a file could not be tokenized
+ *   1  a path could not be read, a file could not be tokenized, or a file is
+ *      over the committed ceiling
  */
 
 import { fileURLToPath } from "node:url";
 
 import {
-  ELIGIBILITY_DEFAULTS,
-  collectCommentDensityFiles,
+  checkCommentDensity,
   describeCommentDensityFindings,
   describeMeasurements,
-  measureFiles,
+  readCommentDensityConfig,
+  summariseCommentDensity,
 } from "./comment-density.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const config = ELIGIBILITY_DEFAULTS;
+const config = readCommentDensityConfig(REPO_ROOT);
+const report = checkCommentDensity(REPO_ROOT, config);
 
-const collected = collectCommentDensityFiles(REPO_ROOT, config);
-const measured = measureFiles(collected.files, config);
-const findings = [...collected.findings, ...measured.findings];
+process.stdout.write(`${describeMeasurements(report.measurements)}\n\n`);
 
-process.stdout.write(`${describeMeasurements(measured.measurements)}\n`);
-
-const worst = measured.measurements[0];
+const worst = report.measurements[0];
 process.stdout.write(
-  `\nfloor ${config.floor} counted lines, ${measured.measurements.length} eligible file(s), ` +
-    `${measured.belowFloor.length} under the floor, ${measured.excluded.length} excluded\n` +
+  `${summariseCommentDensity(report, config)}\n` +
     (worst === undefined
       ? "maximum ratio: none, the eligible set is empty\n"
       : `maximum ratio ${worst.ratio.toFixed(1)} points on ${worst.path}\n`),
 );
 
-for (const exclusion of measured.excluded) {
+for (const exclusion of report.excluded) {
   process.stdout.write(`excluded ${exclusion.path}: ${exclusion.reason}\n`);
 }
 
-if (findings.length > 0) {
-  process.stderr.write(`${describeCommentDensityFindings(findings)}\n`);
+if (report.findings.length > 0) {
+  process.stderr.write(`${describeCommentDensityFindings(report.findings)}\n`);
   process.exit(1);
 }
