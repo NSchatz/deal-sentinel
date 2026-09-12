@@ -9,6 +9,8 @@
  * injected. Production wiring is in `transport.ts` and `system.ts`.
  */
 
+import type { RequestOutcomeClass } from "@deal-sentinel/shared";
+
 /** Monotonic-enough time, injected so elapsed-time rules are gradeable. */
 export type Clock = {
   /** Milliseconds since the epoch. */
@@ -44,6 +46,39 @@ export type Notification = {
 /** ALERT-4 owns the channel; this phase owns one notification per condition. */
 export type Notifier = {
   notify(notification: Notification): void | Promise<void>;
+};
+
+/**
+ * One completed request, as the durable record keeps it. The absences are
+ * deliberate: no URL (this system's API key travels in one), no headers, no
+ * body, no credential.
+ */
+export type RecordedRequestOutcome = {
+  sourceId: string;
+  outcomeClass: RequestOutcomeClass;
+  /** Whole milliseconds on the injected clock, never below zero. */
+  durationMs: number;
+  recordedAt: Date;
+};
+
+/** A record that could not be written, handed back rather than swallowed. */
+export type OutcomeRecordingFailure = {
+  outcome: RecordedRequestOutcome;
+  error: unknown;
+  /** The failure in words, already safe to print: it names no URL. */
+  detail: string;
+};
+
+/**
+ * Where a completed request's outcome goes. `record` may fail - a database is a
+ * thing that goes away - and when it does the governor hands the failure to
+ * `recordingFailed` and carries on: a price not observed cannot be backfilled,
+ * while a missing outcome row is one line of a report.
+ */
+export type RequestOutcomeSink = {
+  record(outcome: RecordedRequestOutcome): void | Promise<void>;
+  /** Never throws: it is the thing that runs when something already has. */
+  recordingFailed(failure: OutcomeRecordingFailure): void;
 };
 
 export type TransportRequest = {

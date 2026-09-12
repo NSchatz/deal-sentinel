@@ -282,6 +282,50 @@ export const sourcePeriodStops = pgTable(
 );
 
 /**
+ * What every governed request did: one row per request, no sampling.
+ *
+ * The columns are the whole of it, and what is ABSENT is load-bearing. There is
+ * no URL column, no header column, no credential column and no response column,
+ * because a request's URL carries this system's API key in its query string and
+ * a response body is a third party's Content under a retention ceiling. This
+ * table is therefore governed by no source's ceiling at all, and the retention
+ * sweep has nothing to do here.
+ *
+ * Rows are INSERTED and never updated: an aggregate computed at write time is a
+ * question somebody guessed in advance, and the window an owner asks about is
+ * not knowable when the request happens.
+ */
+export const requestOutcomes = pgTable(
+  "request_outcomes",
+  {
+    /** Surrogate key. The natural key of a row is (source, recorded instant). */
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
+
+    sourceId: text("source_id").notNull(),
+
+    /** One of `REQUEST_OUTCOME_CLASSES`, stored as its own word. */
+    outcomeClass: text("outcome_class").notNull(),
+
+    /** Whole milliseconds, measured on the governor's injected clock. */
+    durationMs: integer("duration_ms").notNull(),
+
+    /** The instant the request completed, which is what a window selects on. */
+    recordedAt: timestamp("recorded_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+  },
+  (table) => [
+    // The read this table exists for: one source's rows inside one window.
+    index("request_outcomes_source_recorded_idx").on(
+      table.sourceId,
+      table.recordedAt,
+    ),
+    check("request_outcomes_duration_non_negative", sql`${table.durationMs} >= 0`),
+  ],
+);
+
+/**
  * When a rule last fired for a listing, so it does not fire again inside its
  * own cooldown.
  *
@@ -327,3 +371,5 @@ export type WatchlistEntryRow = typeof watchlistEntries.$inferSelect;
 export type NewWatchlistEntryRow = typeof watchlistEntries.$inferInsert;
 export type SourcePeriodStopRow = typeof sourcePeriodStops.$inferSelect;
 export type AlertCooldownRow = typeof alertCooldowns.$inferSelect;
+export type RequestOutcomeRow = typeof requestOutcomes.$inferSelect;
+export type NewRequestOutcomeRow = typeof requestOutcomes.$inferInsert;

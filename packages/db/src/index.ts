@@ -41,6 +41,7 @@ export {
   governorAllowanceUsage,
   historyInitialization,
   priceObservations,
+  requestOutcomes,
   sourcePeriodStops,
   watchlistEntries,
 } from "./schema.ts";
@@ -49,11 +50,26 @@ export type {
   GovernorAllowanceUsageRow,
   InitializationMarkerRow,
   NewPriceObservationRow,
+  NewRequestOutcomeRow,
   NewWatchlistEntryRow,
   PriceObservationRow,
+  RequestOutcomeRow,
   SourcePeriodStopRow,
   WatchlistEntryRow,
 } from "./schema.ts";
+
+export {
+  drizzleRequestOutcomes,
+  emptyCounts,
+  memoryRequestOutcomes,
+} from "./request-outcomes.ts";
+export type {
+  OutcomeCountsReport,
+  OutcomeWindow,
+  RequestOutcome,
+  RequestOutcomeStore,
+  SourceOutcomeCounts,
+} from "./request-outcomes.ts";
 
 export { boundRawContext, drizzleWriter, recordObservation } from "./write-path.ts";
 export type {

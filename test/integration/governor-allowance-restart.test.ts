@@ -21,10 +21,15 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import pg from "pg";
 
-import { createDatabase, initializeHistory } from "@deal-sentinel/db";
+import {
+  createDatabase,
+  drizzleRequestOutcomes,
+  initializeHistory,
+} from "@deal-sentinel/db";
 import {
   Governor,
   LIVE_TRANSPORT,
+  createOutcomeSink,
   createPostgresAllowanceStore,
   periodStartFor,
 } from "@deal-sentinel/governor";
@@ -129,6 +134,12 @@ function startProcess(clock: FakeClock): {
     transport: LIVE_TRANSPORT,
     notifier,
     allowanceStore: store,
+    // This suite is about the allowance counter surviving a restart. The
+    // request record is a different table with its own suite, so this process
+    // is wired to the durable store for it and asserts nothing about it.
+    outcomes: createOutcomeSink({
+      record: drizzleRequestOutcomes(createDatabase(pool)).record,
+    }),
   });
   return {
     governor,

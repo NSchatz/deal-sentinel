@@ -55,6 +55,41 @@ export type ObservationContext = {
   rawContext: string;
 };
 
+/**
+ * What one governed request did, as a closed vocabulary.
+ *
+ * Three of the five exist to keep apart things a single "error" bucket would
+ * merge, and the distinction is the whole point of the class:
+ *
+ *   - `governor-refusal` is THIS system declining to send. The robots decision,
+ *     the breaker, a spent allowance, a host still held by back-pressure and an
+ *     expired answer are all it. Nothing left the process, so no third party
+ *     was involved and none of it is evidence that anybody blocked us.
+ *   - `third-party-block` is the other end declining to answer: the statuses a
+ *     host uses to say "not you, not now".
+ *   - `third-party-error` is the other end answering badly, and
+ *     `transport-error` is nothing answering at all.
+ *
+ * Counting a refusal we chose as a block somebody else made is the failure this
+ * vocabulary exists to prevent: it reads as a source under pressure when it is
+ * a ceiling working exactly as configured.
+ */
+export type RequestOutcomeClass =
+  | "success"
+  | "third-party-block"
+  | "third-party-error"
+  | "transport-error"
+  | "governor-refusal";
+
+/** Every class, for a caller that reports a row per class rather than per row. */
+export const REQUEST_OUTCOME_CLASSES: readonly RequestOutcomeClass[] = [
+  "success",
+  "third-party-block",
+  "third-party-error",
+  "transport-error",
+  "governor-refusal",
+];
+
 export function isExtractionSuccess(
   result: ExtractionResult,
 ): result is ExtractionSuccess {
