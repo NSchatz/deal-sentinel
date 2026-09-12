@@ -15,8 +15,14 @@
  */
 
 import { createDatabase } from "@deal-sentinel/db";
-import type { HistoryDatabase, HistoryWriter } from "@deal-sentinel/db";
-import type { NewPriceObservationRow } from "@deal-sentinel/db";
+import type {
+  HistoryDatabase,
+  HistoryWriter,
+  NewPriceObservationRow,
+  RequestOutcomeStore,
+} from "@deal-sentinel/db";
+import { validateOpsConfig } from "@deal-sentinel/ops";
+import type { OpsConfig, PauseReader } from "@deal-sentinel/ops";
 
 /** One statement a query builder produced, with whatever it was given. */
 export type CapturedStatement = { text: string; values: unknown[] };
@@ -106,3 +112,46 @@ export const DAY_MS = 24 * HOUR_MS;
 
 /** The instant every OPS-5 suite hangs its windows off. */
 export const NOW_MS = Date.UTC(2026, 8, 1, 12, 0, 0);
+
+/**
+ * An operator configuration a test can bend one value of. These are TEST
+ * numbers and are not the committed ones: the committed file is graded
+ * separately, as itself.
+ */
+export function testOpsConfig(overrides: Partial<OpsConfig> = {}): OpsConfig {
+  return validateOpsConfig({
+    dashboard: {
+      windowMs: 7 * DAY_MS,
+      timeZone: "America/New_York",
+      outputPath: "dashboard/index.html",
+      ...overrides.dashboard,
+    },
+    sources: overrides.sources ?? {
+      "bestbuy-api": { stalenessCeilingMs: 2 * DAY_MS },
+      "second-source": { stalenessCeilingMs: 2 * DAY_MS },
+    },
+  });
+}
+
+/** A store whose reads fail, for the criterion about an unreadable store. */
+export function unreadableOutcomeStore(failure = new Error("connection refused")): RequestOutcomeStore {
+  return {
+    record() {
+      return Promise.reject(failure);
+    },
+    countsIn() {
+      return Promise.reject(failure);
+    },
+    lastSuccessAt() {
+      return Promise.reject(failure);
+    },
+  };
+}
+
+/** A pause reader that sees nothing, for a case that is about something else. */
+export const noPauses: PauseReader = {
+  evidence: "period-stop",
+  pauseFor() {
+    return Promise.resolve(null);
+  },
+};

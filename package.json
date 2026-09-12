@@ -31,6 +31,7 @@
     "@deal-sentinel/db": "*",
     "@deal-sentinel/extractor": "*",
     "@deal-sentinel/governor": "*",
+    "@deal-sentinel/ops": "*",
     "@deal-sentinel/shared": "*",
     "@deal-sentinel/sources": "*",
     "@types/node": "22.10.2",

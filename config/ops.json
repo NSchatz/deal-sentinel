@@ -1,0 +1,58 @@
+{
+  "_comment": [
+    "THE NUMBERS IN THIS FILE ARE CONSERVATIVE AND UNVALIDATED, exactly as in",
+    "config/governor.json. BRIEF.md fixes no threshold and CLAUDE.md rule 8",
+    "forbids inventing one and then treating it as decided, so every value here",
+    "exists so that a threshold EXISTS, is committed, and can be changed in a",
+    "commit that says why.",
+    "Keys beginning with an underscore are comments and are ignored by the",
+    "loader. Every other key under dashboard is required: there is no built-in",
+    "default and the dashboard refuses to draw on one."
+  ],
+
+  "dashboard": {
+    "_comment": [
+      "windowMs is how far back the page reaches: the outcome counts it shows",
+      "and the price series it draws are both taken over this window. Seven",
+      "days, because a household watching a few dozen listings sees a handful",
+      "of observations per listing per week and a shorter window would draw a",
+      "series with one mark in it.",
+      "timeZone is the IANA zone every instant on the page is shown in, and it",
+      "is shown BESIDE the instant: a page that showed bare local times would",
+      "be read differently by the same person in two seasons.",
+      "outputPath is where the page is written, relative to the repository",
+      "root. Its directory has to exist: the command refuses to create one,",
+      "because a page written somewhere nobody expected is a page nobody reads."
+    ],
+    "windowMs": 604800000,
+    "timeZone": "America/New_York",
+    "outputPath": "dashboard/index.html"
+  },
+
+  "sources": {
+    "_comment": [
+      "stalenessCeilingMs is how old a source's newest SUCCESSFUL request may",
+      "be before the source reads as broken. The roadmap phase's fail-safe is",
+      "that a source with no recent successful fetch reads as broken and not",
+      "as quiet, and this is the number that decides 'recent'.",
+      "A source with no entry here has its health REFUSED by name rather than",
+      "measured against a ceiling nobody chose. That is deliberate: adding a",
+      "source is where its ceiling gets decided.",
+      "bestbuy-api collects on a daily cadence, so 48 hours is two missed runs",
+      "- long enough that one skipped day is not an alarm, short enough that a",
+      "dead credential is visible the next time the owner opens the page.",
+      "jsonld-generic and alert-channel have no adapter and no deliveries yet,",
+      "so neither has ever had a successful request and both read as broken.",
+      "That is the honest answer: nothing has proved they work."
+    ],
+    "bestbuy-api": {
+      "stalenessCeilingMs": 172800000
+    },
+    "jsonld-generic": {
+      "stalenessCeilingMs": 172800000
+    },
+    "alert-channel": {
+      "stalenessCeilingMs": 604800000
+    }
+  }
+}

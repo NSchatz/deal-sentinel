@@ -136,7 +136,7 @@ import type { BreakerSettings, GovernorConfig } from "./config.ts";
 import { AllowanceLedger } from "./allowance.ts";
 import type { AllowanceReservation, AllowanceStore } from "./allowance.ts";
 import { Breaker } from "./breaker.ts";
-import type { OutcomeClass } from "./breaker.ts";
+import type { BreakerStatus, OutcomeClass } from "./breaker.ts";
 import { InvalidRequestError } from "./errors.ts";
 import type { RefusalReason } from "./errors.ts";
 import { HostScheduler } from "./host-scheduler.ts";
@@ -466,6 +466,18 @@ export class Governor {
   /** Whether a host is currently held by back-pressure, for operator surfaces. */
   heldUntil(host: string): number {
     return this.#scheduler.heldUntil(host);
+  }
+
+  /**
+   * Whether a source is paused by its breaker right now, for the same audience.
+   *
+   * A READ of the gate's own answer - the identical call `#breakerGate` makes,
+   * so an operator surface and the chokepoint can never disagree about whether
+   * a source is paused. It authorises nothing: the answer has no `send` on it
+   * and the gate is asked again on the far side of every wait regardless.
+   */
+  pauseStatus(sourceId: string): BreakerStatus {
+    return this.#breaker.status(sourceId);
   }
 
   /**

@@ -20,6 +20,9 @@ importers:
       '@deal-sentinel/governor':
         specifier: '*'
         version: link:packages/governor
+      '@deal-sentinel/ops':
+        specifier: '*'
+        version: link:packages/ops
       '@deal-sentinel/shared':
         specifier: '*'
         version: link:packages/shared
@@ -89,6 +92,18 @@ importers:
       pg:
         specifier: 8.13.1
         version: 8.13.1
+
+  packages/ops:
+    dependencies:
+      '@deal-sentinel/db':
+        specifier: '*'
+        version: link:../db
+      '@deal-sentinel/governor':
+        specifier: '*'
+        version: link:../governor
+      '@deal-sentinel/shared':
+        specifier: '*'
+        version: link:../shared
 
   packages/shared: {}
 
