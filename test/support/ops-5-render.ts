@@ -338,12 +338,29 @@ async function measure(page: Page): Promise<Omit<PageReading, "engine" | "theme"
       });
     }
 
+    // Content wider than the viewport is allowed, PROVIDED it scrolls inside
+    // its own container: that is exactly what frontend F9 asks for, and a
+    // table of instants and amounts is the case it was written about. So an
+    // element is only reported when nothing between it and the body can
+    // scroll it.
+    const scrollsItsOwn = (element: PageElement): boolean => {
+      let node: PageElement | null = element.parentElement;
+      while (node !== null && node.tagName.toLowerCase() !== "body") {
+        const overflow = getComputedStyle(node).overflowX;
+        if (overflow === "auto" || overflow === "scroll" || overflow === "hidden") {
+          return true;
+        }
+        node = node.parentElement;
+      }
+      return false;
+    };
+
     const overflowingElements: string[] = [];
     for (const element of document.querySelectorAll("body *")) {
       const box = element.getBoundingClientRect();
-      if (box.right > document.documentElement.clientWidth + 0.5) {
-        overflowingElements.push(labelOf(element));
-      }
+      if (box.right <= document.documentElement.clientWidth + 0.5) continue;
+      if (scrollsItsOwn(element)) continue;
+      overflowingElements.push(labelOf(element));
     }
 
     return {

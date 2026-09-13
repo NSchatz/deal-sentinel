@@ -14,15 +14,17 @@
  * one that runs in the house.
  */
 
-import { createDatabase } from "@deal-sentinel/db";
+import { createDatabase, emptyCounts } from "@deal-sentinel/db";
 import type {
   HistoryDatabase,
   HistoryWriter,
   NewPriceObservationRow,
   RequestOutcomeStore,
+  SourceOutcomeCounts,
 } from "@deal-sentinel/db";
-import { validateOpsConfig } from "@deal-sentinel/ops";
-import type { OpsConfig, PauseReader } from "@deal-sentinel/ops";
+import { known, validateOpsConfig } from "@deal-sentinel/ops";
+import type { DashboardModel, OpsConfig, PauseReader } from "@deal-sentinel/ops";
+import type { RequestOutcomeClass } from "@deal-sentinel/shared";
 
 /** One statement a query builder produced, with whatever it was given. */
 export type CapturedStatement = { text: string; values: unknown[] };
@@ -145,6 +147,118 @@ export function unreadableOutcomeStore(failure = new Error("connection refused")
     lastSuccessAt() {
       return Promise.reject(failure);
     },
+  };
+}
+
+/** Five classes at a count each, for a card that shows a real distribution. */
+export function countsOf(
+  sourceId: string,
+  counts: Partial<Record<RequestOutcomeClass, number>> = {},
+): SourceOutcomeCounts {
+  const full = { ...emptyCounts(), ...counts };
+  return {
+    sourceId,
+    counts: full,
+    total: Object.values(full).reduce((sum, count) => sum + count, 0),
+  };
+}
+
+/**
+ * A dashboard model a renderer test can bend one value of.
+ *
+ * Built by hand rather than read out of stores, because the renderer is pure
+ * and the cases worth drawing - a figure nobody could compute, a listing with
+ * no observations, a value carrying markup - are cases a healthy store does not
+ * produce on demand.
+ */
+export function sampleDashboardModel(
+  overrides: Partial<DashboardModel> = {},
+): DashboardModel {
+  const producedAt = new Date(NOW_MS);
+  return {
+    producedAt,
+    window: { start: new Date(NOW_MS - 7 * DAY_MS), end: producedAt },
+    timeZone: "America/New_York",
+    pauseEvidence: ["period-stop"],
+    sources: [
+      {
+        sourceId: "bestbuy-api",
+        state: known("healthy"),
+        pause: null,
+        allowance: known({
+          metered: true,
+          consumed: 7,
+          remaining: 93,
+          limit: 100,
+          periodStart: new Date(NOW_MS - HOUR_MS),
+          periodEnd: new Date(NOW_MS + 23 * HOUR_MS),
+        }),
+        lastSuccessAt: known(new Date(NOW_MS - HOUR_MS)),
+        counts: known(
+          countsOf("bestbuy-api", {
+            success: 12,
+            "third-party-block": 1,
+            "governor-refusal": 3,
+          }),
+        ),
+      },
+      {
+        sourceId: "jsonld-generic",
+        state: known("broken"),
+        pause: null,
+        allowance: known({ metered: false }),
+        lastSuccessAt: known(null),
+        counts: known(countsOf("jsonld-generic")),
+      },
+      {
+        sourceId: "second-source",
+        state: known("paused"),
+        pause: {
+          origin: "period-stop",
+          condition: "the vendor answered 403",
+          at: new Date(NOW_MS - 2 * HOUR_MS),
+          until: new Date(NOW_MS + 22 * HOUR_MS),
+        },
+        allowance: known({
+          metered: true,
+          consumed: 100,
+          remaining: 0,
+          limit: 100,
+          periodStart: new Date(NOW_MS - HOUR_MS),
+          periodEnd: new Date(NOW_MS + 23 * HOUR_MS),
+        }),
+        lastSuccessAt: known(new Date(NOW_MS - 3 * HOUR_MS)),
+        counts: known(countsOf("second-source", { "third-party-block": 4 })),
+      },
+    ],
+    listings: [
+      {
+        sourceId: "bestbuy-api",
+        listingId: "8880044",
+        points: [
+          {
+            amountMinorUnits: 12999n,
+            currency: "USD",
+            observedAt: new Date(NOW_MS - 5 * DAY_MS),
+            availability: "InStock",
+          },
+          {
+            amountMinorUnits: 9999n,
+            currency: "USD",
+            observedAt: new Date(NOW_MS - 3 * DAY_MS),
+            availability: "LimitedAvailability",
+          },
+          {
+            amountMinorUnits: 14999n,
+            currency: "USD",
+            observedAt: new Date(NOW_MS - DAY_MS),
+            availability: null,
+          },
+        ],
+      },
+      { sourceId: "bestbuy-api", listingId: "8880045", points: [] },
+    ],
+    ...overrides,
   };
 }
 

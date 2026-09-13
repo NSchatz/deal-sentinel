@@ -1,0 +1,227 @@
+/*
+ * The dashboard's own rules. Every colour and every spacing length here is a
+ * token from tokens.css (styling S1); this file declares none of its own.
+ *
+ * PHONE FIRST (frontend F9). The layout is one column at any width and grows
+ * to a grid where there is room, so nothing has to be reflowed to fit 360px.
+ * Anything that cannot narrow - the observation table - scrolls inside its own
+ * container rather than pushing the body sideways.
+ *
+ * DATA IS MONOSPACE WITH TABULAR FIGURES (styling S5): amounts, instants,
+ * counts and durations all line up in a column, which is what makes a column of
+ * prices readable as a series at all. Prose and headings are the system sans.
+ *
+ * NO MOTION (styling S9). There is no transition and no animation in this file,
+ * so every value change is legible with motion off because there is no motion
+ * to turn off.
+ */
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  padding: var(--space-4);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: var(--text-base);
+  line-height: var(--line-body);
+}
+
+h1 {
+  font-size: var(--text-xl);
+  margin: 0 0 var(--space-2) 0;
+}
+
+h2 {
+  font-size: var(--text-lg);
+  margin: 0 0 var(--space-3) 0;
+}
+
+h3 {
+  font-size: var(--text-base);
+  margin: 0 0 var(--space-2) 0;
+}
+
+p {
+  margin: 0 0 var(--space-2) 0;
+}
+
+section {
+  margin-bottom: var(--section-gap);
+}
+
+.scope {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  margin: 0 0 var(--space-3) 0;
+}
+
+.data {
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--card-min), 1fr));
+  gap: var(--card-gap);
+}
+
+.card {
+  background: var(--card-bg);
+  border: var(--hairline) solid var(--card-line);
+  border-radius: var(--space-2);
+  padding: var(--card-pad);
+}
+
+.card h3 {
+  overflow-wrap: anywhere;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 700;
+}
+
+.dot {
+  width: var(--space-3);
+  height: var(--space-3);
+  border-radius: 50%;
+  border: var(--hairline) solid var(--panel);
+}
+
+.state-healthy {
+  color: var(--state-ok);
+}
+
+.state-healthy .dot {
+  background: var(--state-ok);
+}
+
+.state-paused {
+  color: var(--state-warn);
+}
+
+.state-paused .dot {
+  background: var(--state-warn);
+}
+
+.state-broken {
+  color: var(--state-bad);
+}
+
+.state-broken .dot {
+  background: var(--state-bad);
+}
+
+.state-unavailable {
+  color: var(--muted);
+}
+
+.state-unavailable .dot {
+  background: var(--muted);
+}
+
+dl {
+  margin: var(--space-3) 0 0 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-3);
+}
+
+dt {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.unavailable {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.series {
+  border: var(--hairline) solid var(--card-line);
+  border-radius: var(--space-2);
+  padding: var(--card-pad);
+  margin-bottom: var(--card-gap);
+  background: var(--card-bg);
+}
+
+.chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: var(--chart-pad) 0;
+}
+
+.axis {
+  stroke: var(--chart-axis);
+  stroke-width: 1;
+}
+
+.mark {
+  fill: var(--chart-mark);
+}
+
+.table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+caption {
+  text-align: left;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  padding-bottom: var(--space-2);
+}
+
+th,
+td {
+  border-bottom: var(--hairline) solid var(--table-line);
+  padding: var(--table-pad);
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 700;
+  font-size: var(--text-xs);
+}
+
+.empty {
+  color: var(--muted);
+  padding: var(--space-3) 0;
+}
+
+a {
+  color: var(--link);
+}
+
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: var(--focus-ring) solid var(--focus);
+  outline-offset: var(--space-1);
+}
+
+footer {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  border-top: var(--hairline) solid var(--line);
+  padding-top: var(--space-3);
+}

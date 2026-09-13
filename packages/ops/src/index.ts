@@ -27,6 +27,37 @@ export {
   readOrRefuse,
 } from "./errors.ts";
 
+export { CHART, plotSeries } from "./chart.ts";
+export type { PlottedMark } from "./chart.ts";
+
+export {
+  NOT_RECORDED_TEXT,
+  UNAVAILABLE_TEXT,
+  buildDashboardModel,
+  dashboardStylesheet,
+  known,
+  renderDashboard,
+  unavailable,
+} from "./dashboard.ts";
+export type {
+  AllowanceFigure,
+  DashboardDependencies,
+  DashboardModel,
+  Figure,
+  ListingSeries,
+  SourceCard,
+} from "./dashboard.ts";
+
+export { showDuration, showInstant } from "./instants.ts";
+
+export {
+  DashboardOutputError,
+  OUTPUT_UNWRITABLE_EXIT_CODE,
+  assertOutputWritable,
+  writeDashboard,
+} from "./write.ts";
+export { literalAttribute, literalText } from "./text.ts";
+
 export {
   breakerPauses,
   combinePauseReaders,

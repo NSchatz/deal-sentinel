@@ -96,9 +96,16 @@ export type {
 
 export {
   drizzleObservationHistory,
+  drizzleObservationSeries,
   memoryObservationHistory,
+  memoryObservationSeries,
 } from "./observations.ts";
-export type { ObservationHistoryStore, ObservationPoint } from "./observations.ts";
+export type {
+  ObservationHistoryStore,
+  ObservationPoint,
+  ObservationSeriesPoint,
+  ObservationSeriesStore,
+} from "./observations.ts";
 
 export { drizzleAlertCooldowns, memoryAlertCooldowns } from "./alert-state.ts";
 export type { AlertCooldown, AlertCooldownStore } from "./alert-state.ts";

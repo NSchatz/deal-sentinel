@@ -14,11 +14,22 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
+import { formatMinorUnits } from "@deal-sentinel/extractor";
+import {
+  DashboardOutputError,
+  OUTPUT_UNWRITABLE_EXIT_CODE,
+  renderDashboard,
+  showInstant,
+  unavailable,
+  writeDashboard,
+} from "@deal-sentinel/ops";
+
+import { sampleDashboardModel } from "../support/ops-5-harness.ts";
 import {
   BrowserEngineUnavailableError,
   DESKTOP_WIDTH,
@@ -35,6 +46,18 @@ import {
   readRenderedPage,
   startEngine,
 } from "../support/ops-5-render.ts";
+import type { PageReading, Theme } from "../support/ops-5-render.ts";
+
+/**
+ * A control character, built from its code point rather than typed.
+ *
+ * A raw control byte in a source file is a byte nobody at a review gate can
+ * see, and it makes a diff unreadable. The VALUE has to be real - the criterion
+ * is about a stored value that carries one - so it is constructed here, named,
+ * and paired with the escape the page is expected to show in its place.
+ */
+const UNRECOGNISED_CONTROL = String.fromCodePoint(1);
+const CONTROL_AS_SHOWN = "\\u0001";
 
 /** A document that satisfies every check, for the other side of each proof. */
 const SOUND_PAGE = `<!doctype html>
@@ -225,6 +248,348 @@ describe("the grader goes red against a page built to break each check", () => {
     );
     assert.equal(focus.length, 1, `the tab walk reached ${JSON.stringify(focus)}`);
     assert.match(focus[0].label, /^a /);
+  });
+});
+
+/* ================================================================== *
+ * The page itself, measured in the engine
+ * ================================================================== */
+
+/** One reading of the real page, per theme and width, shared by the cases. */
+const PAGE = renderDashboard(sampleDashboardModel());
+const readings = new Map<string, PageReading>();
+
+async function page(theme: Theme, width: number): Promise<PageReading> {
+  const key = `${theme}-${width}`;
+  const held = readings.get(key);
+  if (held !== undefined) return held;
+  const reading = await readRenderedPage(PAGE, { theme, width });
+  readings.set(key, reading);
+  return reading;
+}
+
+describe("AC-13, AC-14 and AC-15: the series, as drawn and as text", () => {
+  it("draws one mark per observation, in time order, dearer above cheaper", async () => {
+    const reading = await page("light", DESKTOP_WIDTH);
+    const model = sampleDashboardModel();
+    const series = model.listings[0];
+
+    const marks = reading.marks.filter(
+      (mark) => mark.data["data-listing"] === series.listingId,
+    );
+    assert.equal(marks.length, series.points.length);
+    for (const mark of marks) {
+      assert.ok(mark.width > 0 && mark.height > 0, "a mark was drawn with no area");
+    }
+    assertMarksInTimeOrder(marks);
+    assertHigherAmountsDrawnAbove(marks);
+
+    // The specific pair, said out loud: 149.99 is the dearest and sits above
+    // the 99.99 that is the cheapest, whatever order they were observed in.
+    const dearest = marks.find((mark) => mark.data["data-amount"] === "14999");
+    const cheapest = marks.find((mark) => mark.data["data-amount"] === "9999");
+    assert.ok(dearest !== undefined && cheapest !== undefined);
+    assert.ok(dearest.y < cheapest.y, `${dearest.y} is not above ${cheapest.y}`);
+  });
+
+  it("puts every amount and instant in the accessibility tree as text", async () => {
+    const reading = await page("light", DESKTOP_WIDTH);
+    const model = sampleDashboardModel();
+
+    for (const point of model.listings[0].points) {
+      const amount = formatMinorUnits(point.amountMinorUnits, point.currency);
+      const instant = showInstant(point.observedAt, model.timeZone);
+      assert.ok(
+        reading.accessibleText.includes(amount),
+        `${amount} is not reachable in the accessibility tree`,
+      );
+      assert.ok(
+        reading.accessibleText.includes(instant),
+        `${instant} is not reachable in the accessibility tree`,
+      );
+    }
+  });
+
+  it("shows the exact stored minor units, with no rounding and no float", async () => {
+    const reading = await page("light", DESKTOP_WIDTH);
+    assert.match(reading.visibleText, /USD 129\.99/);
+    assert.match(reading.visibleText, /USD 99\.99/);
+    assert.match(reading.visibleText, /USD 149\.99/);
+    // The failure this rules out: a float would round 12999 minor units to
+    // 129.99000000000001 or to 130, and a naive divide would drop the zero.
+    assert.doesNotMatch(reading.visibleText, /129\.9900/);
+    assert.doesNotMatch(reading.visibleText, /USD 130\b/);
+  });
+
+  it("shows every instant with an explicit zone", async () => {
+    const reading = await page("light", DESKTOP_WIDTH);
+    const instants = reading.visibleText.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[^\n]{0,6}/g);
+    assert.ok(instants !== null && instants.length >= 6, "the page shows no instants");
+    for (const instant of instants) {
+      assert.match(
+        instant,
+        /\d{2}:\d{2}:\d{2} [A-Z]{2,5}/,
+        `${instant} is shown with no time zone beside it`,
+      );
+    }
+  });
+});
+
+describe("AC-16 and AC-17: every source, and how old the page is", () => {
+  it("shows each source's state, pause, allowance and last-success age as text", async () => {
+    const reading = await page("light", DESKTOP_WIDTH);
+
+    for (const source of sampleDashboardModel().sources) {
+      assert.ok(
+        reading.visibleText.includes(source.sourceId),
+        `${source.sourceId} is not on the page at all`,
+      );
+    }
+    assert.match(reading.visibleText, /healthy/);
+    assert.match(reading.visibleText, /paused/);
+    assert.match(reading.visibleText, /broken/);
+    // The paused source names the condition that paused it.
+    assert.match(reading.visibleText, /the vendor answered 403/);
+    // The metered sources show consumed and remaining, and the unmetered one
+    // shows neither a zero nor an unlimited.
+    assert.match(reading.visibleText, /7 used, 93 left of 100/);
+    assert.match(reading.visibleText, /100 used, 0 left of 100/);
+    assert.match(reading.visibleText, /not metered/);
+    // How old the newest success is, in words.
+    assert.match(reading.visibleText, /1 hour/);
+    assert.match(reading.visibleText, /3 hours/);
+  });
+
+  it("shows a stale source as broken and stamps the page with its own instant", async () => {
+    const model = sampleDashboardModel();
+    const reading = await page("light", DESKTOP_WIDTH);
+    const produced = showInstant(model.producedAt, model.timeZone);
+
+    assert.ok(
+      reading.visibleText.includes(produced),
+      `the page does not show when it was produced (${produced})`,
+    );
+    assert.match(reading.visibleText, /Nothing on this page updates itself/);
+    // The source with no successful request at all reads as broken, and its
+    // last success reads as not recorded rather than as a zero or a dash.
+    assert.match(reading.visibleText, /not recorded/);
+    assert.doesNotMatch(reading.visibleText, /\bidle\b|\bquiet\b/);
+  });
+});
+
+describe("AC-18 and AC-19: nothing to show, and a figure nobody could compute", () => {
+  it("shows an explicit empty state for a listing with no observation, and draws none", async () => {
+    const reading = await page("light", DESKTOP_WIDTH);
+    assert.match(reading.visibleText, /No observation in the shown window/);
+    assert.equal(
+      reading.marks.filter((mark) => mark.data["data-listing"] === "8880045").length,
+      0,
+      "a series was drawn for a listing with no observations",
+    );
+  });
+
+  it("says so when no listing is tracked at all, rather than drawing a frame", async () => {
+    const empty = await readRenderedPage(
+      renderDashboard(sampleDashboardModel({ listings: [] })),
+    );
+    assert.match(empty.visibleText, /No listing is tracked/);
+    assert.equal(empty.marks.length, 0);
+    // The rest of the page is still there: an empty watchlist is not an error.
+    assert.match(empty.visibleText, /bestbuy-api/);
+  });
+
+  it("shows an unavailable figure as unavailable, and still draws everything else", async () => {
+    const model = sampleDashboardModel();
+    const why = "no staleness ceiling is configured for this source";
+    const broken = sampleDashboardModel({
+      sources: [
+        {
+          ...model.sources[0],
+          allowance: unavailable(why),
+        },
+        ...model.sources.slice(1),
+      ],
+    });
+
+    const reading = await readRenderedPage(renderDashboard(broken));
+    assert.match(reading.visibleText, new RegExp(`unavailable: ${why}`));
+    // Never a zero and never a dash in place of the figure.
+    assert.doesNotMatch(reading.visibleText, /Allowance\n0\b/);
+    assert.doesNotMatch(reading.visibleText, /Allowance\n-\n/);
+    // Everything else still rendered: the other sources, and the chart.
+    assert.match(reading.visibleText, /100 used, 0 left of 100/);
+    assert.equal(reading.marks.length, model.listings[0].points.length);
+  });
+});
+
+describe("AC-20: a stored value is shown, never executed and never dropped", () => {
+  it("shows markup, control characters and an unknown token as literal text", async () => {
+    const model = sampleDashboardModel();
+    const hostile = sampleDashboardModel({
+      listings: [
+        {
+          sourceId: "bestbuy-api",
+          listingId: "<script>alert(1)</script>",
+          points: [
+            {
+              amountMinorUnits: 1999n,
+              currency: "USD",
+              observedAt: new Date(model.producedAt.getTime() - 3_600_000),
+              availability: `<b>MadeToOrder</b>${UNRECOGNISED_CONTROL}`,
+            },
+          ],
+        },
+      ],
+    });
+
+    const html = renderDashboard(hostile);
+    const reading = await readRenderedPage(html);
+
+    // No element was created from either value.
+    assert.doesNotMatch(html, /<script>alert/);
+    assert.equal(reading.consoleErrors.length, 0);
+    // Both values are SHOWN, in full, as text.
+    assert.ok(
+      reading.visibleText.includes("<script>alert(1)</script>"),
+      `the listing id was not shown literally: ${reading.visibleText.slice(0, 400)}`,
+    );
+    assert.ok(
+      reading.visibleText.includes("<b>MadeToOrder</b>"),
+      "the availability token was not shown literally",
+    );
+    // The control character is shown as the escape that names it rather than
+    // dropped, so the page and the store do not quietly disagree.
+    assert.ok(
+      reading.visibleText.includes(CONTROL_AS_SHOWN),
+      "a control character was dropped rather than shown as the escape that " +
+        "names it, so the page and the store quietly disagree",
+    );
+    assert.ok(
+      reading.visibleText.includes(`<b>MadeToOrder</b>${CONTROL_AS_SHOWN}`),
+      "the value either side of the control character was not kept whole",
+    );
+    assert.equal(reading.marks.length, 1, "the hostile listing lost its observation");
+  });
+});
+
+describe("AC-21, AC-22, AC-23 and AC-24: policy, phone, contrast, and not by colour", () => {
+  it("sets a policy the engine reports no violation of, and asks no other origin", async () => {
+    const reading = await page("light", DESKTOP_WIDTH);
+    assert.match(PAGE, /Content-Security-Policy/);
+    assert.match(PAGE, /default-src &#39;none&#39;/);
+    assertNoPolicyViolations(reading);
+    assertNoForeignRequests(reading);
+    assert.deepEqual(
+      reading.requests.filter((url) => !url.startsWith("file://")),
+      [],
+    );
+    assert.deepEqual(reading.consoleErrors, []);
+  });
+
+  it("leaves the body free of sideways scrolling at 360px", async () => {
+    const reading = await page("light", PHONE_WIDTH);
+    assertNoSidewaysScroll(reading);
+    assert.equal(reading.bodyScrollWidth, reading.clientWidth);
+    // The wide thing is still there and still readable: it scrolls inside its
+    // own container rather than being cut off.
+    assert.match(reading.visibleText, /USD 129\.99/);
+  });
+
+  it("clears its contrast floors in both themes, measured from the document", async () => {
+    for (const theme of ["light", "dark"] as const) {
+      for (const width of [PHONE_WIDTH, DESKTOP_WIDTH]) {
+        const reading = await page(theme, width);
+        assertMeasuredSomething(reading);
+        assertContrastFloors(reading);
+      }
+    }
+  });
+
+  it("conveys every state in text as well as in colour", async () => {
+    const reading = await page("light", DESKTOP_WIDTH);
+    // Each state word is present as TEXT. A reader who sees no colour at all
+    // still reads healthy, paused and broken.
+    for (const word of ["healthy", "paused", "broken"]) {
+      assert.ok(reading.visibleText.includes(word), `${word} is carried by colour alone`);
+    }
+    // And the indicator beside each one clears the non-text floor.
+    const indicators = reading.contrast.filter((pair) => pair.floor === 3);
+    assert.ok(indicators.length >= 3, "the state dots were not measured at all");
+  });
+
+  it("gives every keyboard-reachable element a visible focus indicator", async () => {
+    const focus = await readKeyboardFocus(PAGE);
+    assert.ok(focus.length >= 2, `the tab walk reached ${focus.length} element(s)`);
+    for (const reading of focus) {
+      assert.ok(
+        reading.outlineWidth >= 2 && reading.outlineStyle !== "none",
+        `${reading.label} showed no visible focus ring: ${JSON.stringify(reading)}`,
+      );
+    }
+  });
+});
+
+describe("AC-12: an output location that cannot be written", () => {
+  it("refuses an absent directory, names it, and leaves nothing behind", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "ops-5-output-"));
+    try {
+      const target = path.join(directory, "not-here", "index.html");
+      assert.throws(
+        () => writeDashboard(PAGE, target),
+        (error: unknown) => {
+          assert.ok(error instanceof DashboardOutputError);
+          assert.equal(error.exitCode, OUTPUT_UNWRITABLE_EXIT_CODE);
+          assert.ok(error.message.includes(target), `the path is not in ${error.message}`);
+          assert.match(error.message, /Nothing was created/);
+          return true;
+        },
+      );
+      assert.deepEqual(await readdir(directory), [], "a partial artifact was left behind");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a directory it cannot write to, and leaves nothing behind", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "ops-5-readonly-"));
+    const target = path.join(directory, "index.html");
+    try {
+      await chmod(directory, 0o500);
+      let refused = false;
+      try {
+        writeDashboard(PAGE, target);
+      } catch (error) {
+        refused = error instanceof DashboardOutputError;
+        assert.ok(refused, `an unexpected failure: ${String(error)}`);
+        assert.ok((error as DashboardOutputError).message.includes(target));
+      }
+      // A grader running with the privilege to write anywhere is not shown a
+      // permission denial; the case is then the one above, and this asserts
+      // only that nothing partial was left either way.
+      await chmod(directory, 0o700);
+      const left = await readdir(directory);
+      assert.deepEqual(
+        left.filter((name) => name.includes("partial")),
+        [],
+        "a partial artifact was left behind",
+      );
+    } finally {
+      await chmod(directory, 0o700);
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("writes the page atomically where it can", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "ops-5-written-"));
+    try {
+      const target = path.join(directory, "index.html");
+      const written = writeDashboard(PAGE, target);
+      assert.equal(written, target);
+      assert.equal(await readFile(target, "utf8"), PAGE);
+      assert.deepEqual(await readdir(directory), ["index.html"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
 

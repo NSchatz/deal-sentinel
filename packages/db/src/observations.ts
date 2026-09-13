@@ -79,6 +79,77 @@ export function drizzleObservationHistory(
 }
 
 /**
+ * One stored observation as a SURFACE shows it: the same exact amount and
+ * instant a rule sees, plus the availability token the source published.
+ *
+ * A second, wider point type rather than a wider `ObservationPoint`, for the
+ * reason `watchlist.ts` keeps two entry types: a rule compares numbers and must
+ * not be handed a token it might branch on, while a page showing history has to
+ * show what the source actually said - including a token this system does not
+ * recognise, verbatim, because the alternative is quietly dropping it.
+ */
+export type ObservationSeriesPoint = ObservationPoint & {
+  /** The schema.org token as received, or null where the markup declared none. */
+  availability: string | null;
+};
+
+/** The narrow port an operator surface reads a listing's history through. */
+export type ObservationSeriesStore = {
+  /** The same window rule as `windowFor`: `after < observedAt <= until`. */
+  seriesFor(
+    listingId: string,
+    after: Date,
+    until: Date,
+  ): Promise<ObservationSeriesPoint[]>;
+};
+
+export function drizzleObservationSeries(
+  database: HistoryDatabase,
+): ObservationSeriesStore {
+  return {
+    async seriesFor(listingId, after, until) {
+      return await database
+        .select({
+          amountMinorUnits: priceObservations.amountMinorUnits,
+          currency: priceObservations.currency,
+          observedAt: priceObservations.observedAt,
+          availability: priceObservations.availability,
+        })
+        .from(priceObservations)
+        .where(
+          and(
+            eq(priceObservations.listingId, listingId),
+            gt(priceObservations.observedAt, after),
+            lte(priceObservations.observedAt, until),
+          ),
+        )
+        .orderBy(asc(priceObservations.observedAt));
+    },
+  };
+}
+
+/** The same read in memory, for a caller with no database. */
+export function memoryObservationSeries(
+  rows: Readonly<Record<string, readonly ObservationSeriesPoint[]>>,
+): ObservationSeriesStore {
+  return {
+    seriesFor(listingId, after, until) {
+      const held = rows[listingId] ?? [];
+      return Promise.resolve(
+        held
+          .filter(
+            (point) =>
+              point.observedAt.getTime() > after.getTime() &&
+              point.observedAt.getTime() <= until.getTime(),
+          )
+          .sort((left, right) => left.observedAt.getTime() - right.observedAt.getTime())
+          .map((point) => ({ ...point })),
+      );
+    },
+  };
+}
+
+/**
  * The same read in memory, answering by the same rule, for a caller with no
  * database. A test that uses it is testing the caller and not this.
  */

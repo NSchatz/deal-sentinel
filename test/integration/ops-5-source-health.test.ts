@@ -13,7 +13,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { memoryRequestOutcomes, memorySourceStops } from "@deal-sentinel/db";
+import {
+  memoryObservationSeries,
+  memoryRequestOutcomes,
+  memorySourceStops,
+  memoryWatchlist,
+} from "@deal-sentinel/db";
 import type { RequestOutcome } from "@deal-sentinel/db";
 import { createMemoryAllowanceStore, periodStartFor } from "@deal-sentinel/governor";
 import type { GovernorConfig } from "@deal-sentinel/governor";
@@ -21,6 +26,7 @@ import {
   MissingStalenessCeilingError,
   StoreUnreadableError,
   breakerPauses,
+  buildDashboardModel,
   combinePauseReaders,
   periodStopPauses,
   readHealthReport,
@@ -354,6 +360,89 @@ describe("AC-11: an unreadable store fails, and produces no report at all", () =
       (error: unknown) => {
         assert.ok(error instanceof StoreUnreadableError);
         assert.match(error.message, /the allowance counter for/);
+        return true;
+      },
+    );
+  });
+});
+
+describe("the page model, built from the same stores", () => {
+  it("carries every source, every enabled listing and its observations", async () => {
+    const clock = new FakeClock(NOW_MS);
+    const model = await buildDashboardModel({
+      ...deps({
+        clock,
+        outcomes: memoryRequestOutcomes([success(METERED, NOW_MS - MINUTE_MS)]),
+      }),
+      watchlist: memoryWatchlist([
+        { sourceId: METERED, listingId: "8880044", enabled: true },
+        { sourceId: METERED, listingId: "8880045", enabled: true },
+      ]),
+      series: memoryObservationSeries({
+        "8880044": [
+          {
+            amountMinorUnits: 12999n,
+            currency: "USD",
+            observedAt: new Date(NOW_MS - DAY_MS),
+            availability: "InStock",
+          },
+        ],
+      }),
+    });
+
+    assert.equal(model.producedAt.getTime(), NOW_MS);
+    assert.deepEqual(
+      model.sources.map((card) => card.sourceId),
+      [METERED, UNMETERED],
+    );
+    assert.deepEqual(
+      model.listings.map((listing) => listing.listingId),
+      ["8880044", "8880045"],
+    );
+    assert.equal(model.listings[0].points.length, 1);
+    assert.equal(model.listings[1].points.length, 0, "a listing borrowed another's history");
+  });
+
+  it("turns a refused source into unavailable figures rather than a missing card", async () => {
+    const clock = new FakeClock(NOW_MS);
+    const model = await buildDashboardModel({
+      ...deps({
+        clock,
+        config: testOpsConfig({ sources: { [UNMETERED]: { stalenessCeilingMs: DAY_MS } } }),
+      }),
+      watchlist: memoryWatchlist([]),
+      series: memoryObservationSeries({}),
+    });
+
+    const refused = model.sources.find((card) => card.sourceId === METERED);
+    assert.ok(refused !== undefined, "the refused source lost its card entirely");
+    assert.equal(refused.state.known, false);
+    assert.equal(refused.allowance.known, false);
+    assert.match(
+      refused.state.known === false ? refused.state.why : "",
+      /stalenessCeilingMs/,
+    );
+    // Every other source still carries its figures.
+    const other = model.sources.find((card) => card.sourceId === UNMETERED);
+    assert.equal(other?.state.known, true);
+  });
+
+  it("fails rather than drawing when the watchlist cannot be read", async () => {
+    const clock = new FakeClock(NOW_MS);
+    await assert.rejects(
+      () =>
+        buildDashboardModel({
+          ...deps({ clock }),
+          watchlist: {
+            enabledFor() {
+              return Promise.reject(new Error("the watchlist is unreachable"));
+            },
+          },
+          series: memoryObservationSeries({}),
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof StoreUnreadableError);
+        assert.match(error.message, /the watchlist for/);
         return true;
       },
     );

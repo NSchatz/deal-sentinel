@@ -98,6 +98,9 @@ importers:
       '@deal-sentinel/db':
         specifier: '*'
         version: link:../db
+      '@deal-sentinel/extractor':
+        specifier: '*'
+        version: link:../extractor
       '@deal-sentinel/governor':
         specifier: '*'
         version: link:../governor
