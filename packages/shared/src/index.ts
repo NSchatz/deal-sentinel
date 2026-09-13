@@ -63,12 +63,13 @@ export type ObservationContext = {
  *
  *   - `governor-refusal` is THIS system declining to send. The robots decision,
  *     the breaker, a spent allowance, a host still held by back-pressure and an
- *     expired answer are all it. Nothing left the process, so no third party
- *     was involved and none of it is evidence that anybody blocked us.
+ *     expired answer are all it: nothing left the process for them, so none of
+ *     it is evidence that anybody blocked us.
  *   - `third-party-block` is the other end declining to answer: the statuses a
  *     host uses to say "not you, not now".
- *   - `third-party-error` is the other end answering badly, and
- *     `transport-error` is nothing answering at all.
+ *   - `third-party-error` is the other end answering badly. `transport-error` is
+ *     nothing answering: a send that failed, and a request whose own
+ *     `/robots.txt` retrieval left and could not be reached.
  *
  * Counting a refusal we chose as a block somebody else made is the failure this
  * vocabulary exists to prevent: it reads as a source under pressure when it is

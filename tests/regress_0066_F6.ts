@@ -25,14 +25,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { productRequests } from "../support/governor-harness.ts";
+import { productRequests } from "../test/support/governor-harness.ts";
 import type { TransportRequest, TransportResponse } from "@deal-sentinel/governor";
 import {
   BESTBUY_BASE_URL,
   TEST_CREDENTIAL,
   readVendorFixture,
   sourceHarness,
-} from "../support/source-3-harness.ts";
+} from "../test/support/source-3-harness.ts";
 
 const SOURCE = "bestbuy-api";
 const SKU = "8880044";
