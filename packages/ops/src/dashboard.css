@@ -160,8 +160,19 @@ dd {
 .chart {
   display: block;
   width: 100%;
+  max-width: var(--chart-max);
   height: auto;
   padding: var(--chart-pad) 0;
+}
+
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+
+.count {
+  white-space: nowrap;
 }
 
 .axis {

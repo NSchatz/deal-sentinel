@@ -17,12 +17,18 @@
 import type { ObservationSeriesPoint } from "@deal-sentinel/db";
 
 /** The drawing area, in the SVG's own user units. */
+/**
+ * The drawing area is 360 user units wide on purpose: that is the narrowest
+ * viewport this page is proved at, so at a phone width the chart draws at
+ * roughly 1:1 and a mark stays the size it was chosen to be. On a desktop the
+ * stylesheet caps how far it scales up, so the marks never become blobs.
+ */
 export const CHART = {
-  width: 600,
-  height: 180,
+  width: 360,
+  height: 160,
   padX: 16,
   padY: 16,
-  markRadius: 4,
+  markRadius: 5,
 } as const;
 
 export type PlottedMark = {

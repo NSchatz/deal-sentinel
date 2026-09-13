@@ -252,10 +252,19 @@ function sourceCard(card: SourceCard, timeZone: string, producedAt: Date): strin
   rows.push(
     row(
       "Requests in window",
-      figureText(card.counts, (counts) =>
-        REQUEST_OUTCOME_CLASSES.map(
-          (outcomeClass) => `${literalText(outcomeClass)} ${counts.counts[outcomeClass]}`,
-        ).join(" &middot; "),
+      figureText(
+        card.counts,
+        (counts) =>
+          // Each class and its count stay on one line together: a count that
+          // wrapped away from the word it belongs to is a number beside the
+          // wrong name.
+          `<span class="counts">` +
+          REQUEST_OUTCOME_CLASSES.map(
+            (outcomeClass) =>
+              `<span class="count">${literalText(outcomeClass)} ` +
+              `${counts.counts[outcomeClass]}</span>`,
+          ).join("") +
+          `</span>`,
       ),
     ),
   );

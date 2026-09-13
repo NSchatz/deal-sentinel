@@ -124,6 +124,8 @@
   /* The width a source card stops sharing a row at, and the focus ring. */
   --card-min: 280px;
   --focus-ring: 2px;
+  /* How far a chart may scale up before its marks become blobs. */
+  --chart-max: 640px;
 }
 
 /*

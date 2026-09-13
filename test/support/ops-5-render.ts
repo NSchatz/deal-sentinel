@@ -163,6 +163,15 @@ export type FocusReading = {
   ring: string;
 };
 
+/** What the cascade resolved one element's typeface to. */
+export type FaceReading = {
+  label: string;
+  family: string;
+  numerals: string;
+  /** Whether the element is one the page marks as carrying data. */
+  data: boolean;
+};
+
 export type PageReading = {
   /** The engine that produced this reading, for the record. */
   engine: string;
@@ -179,6 +188,7 @@ export type PageReading = {
   clientWidth: number;
   overflowingElements: string[];
   contrast: ContrastReading[];
+  faces: FaceReading[];
   consoleErrors: string[];
 };
 
@@ -363,10 +373,37 @@ async function measure(page: Page): Promise<Omit<PageReading, "engine" | "theme"
       overflowingElements.push(labelOf(element));
     }
 
+    // What the cascade resolved each element's face to, for the clause that
+    // says data is monospace with tabular figures and prose is not.
+    const faces: { label: string; family: string; numerals: string; data: boolean }[] = [];
+    for (const element of document.querySelectorAll("body *")) {
+      const hasOwnText = [...element.childNodes].some(
+        (node) => node.nodeType === 3 && (node.textContent ?? "").trim() !== "",
+      );
+      if (!hasOwnText) continue;
+      const style = getComputedStyle(element);
+      // An element inside a data region is data: the face is inherited, and
+      // asking only about the element's own class would call a span inside a
+      // column of amounts prose.
+      let carriesData = false;
+      let node: PageElement | null = element;
+      while (node !== null) {
+        if (String(node.className).split(" ").includes("data")) carriesData = true;
+        node = node.parentElement;
+      }
+      faces.push({
+        label: labelOf(element),
+        family: style.fontFamily,
+        numerals: style.fontVariantNumeric,
+        data: carriesData,
+      });
+    }
+
     return {
       visibleText: document.body.innerText,
       marks,
       contrast,
+      faces,
       overflowingElements,
       bodyScrollWidth: document.body.scrollWidth,
       clientWidth: document.documentElement.clientWidth,

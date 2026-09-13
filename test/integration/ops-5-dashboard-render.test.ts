@@ -517,6 +517,30 @@ describe("AC-21, AC-22, AC-23 and AC-24: policy, phone, contrast, and not by col
     assert.ok(indicators.length >= 3, "the state dots were not measured at all");
   });
 
+  it("resolves data to a monospace face with tabular figures, and prose to neither", async () => {
+    const reading = await page("light", DESKTOP_WIDTH);
+    const data = reading.faces.filter((face) => face.data);
+    const prose = reading.faces.filter((face) => !face.data);
+
+    assert.ok(data.length >= 5, `only ${data.length} element(s) carry data`);
+    for (const face of data) {
+      assert.match(face.family, /mono/i, `${face.label} shows data in ${face.family}`);
+      assert.match(
+        face.numerals,
+        /tabular-nums/,
+        `${face.label} shows figures that do not line up: ${face.numerals}`,
+      );
+    }
+    assert.ok(prose.length >= 3, `only ${prose.length} element(s) carry prose`);
+    for (const face of prose) {
+      assert.doesNotMatch(
+        face.family,
+        /^ui-monospace/,
+        `${face.label} shows prose in the data face`,
+      );
+    }
+  });
+
   it("gives every keyboard-reachable element a visible focus indicator", async () => {
     const focus = await readKeyboardFocus(PAGE);
     assert.ok(focus.length >= 2, `the tab walk reached ${focus.length} element(s)`);
