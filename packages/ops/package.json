@@ -1,0 +1,21 @@
+{
+  "name": "@deal-sentinel/ops",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The operator surface: per-source health over the request record, the pause and allowance state the governor keeps, and the one dashboard page an owner opens.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "bin": {
+    "ops-dashboard": "./src/cli/dashboard.ts"
+  },
+  "dependencies": {
+    "@deal-sentinel/db": "*",
+    "@deal-sentinel/extractor": "*",
+    "@deal-sentinel/governor": "*",
+    "@deal-sentinel/shared": "*"
+  }
+}

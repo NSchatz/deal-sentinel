@@ -70,6 +70,29 @@ jobs:
       - name: Install exactly what the lockfile already names
         run: pnpm install --frozen-lockfile
 
+      # The render grader drives a real browser engine, so one has to BE here.
+      # The runner image ships a browser, and this step deliberately does not
+      # use it: what an image happens to carry moves under this repository with
+      # no diff, and the engine is the instrument every claim about what the
+      # dashboard shows is measured with. So an exact Chrome for Testing build
+      # is taken, checked against its digest, and refused if it does not match
+      # (pinning-conventions P1 and P6: a build that cannot resolve exactly
+      # what it pinned stops, and says so). Chrome for Testing keeps every
+      # published build, which is P5.
+      - name: Put the exact browser engine the render grader drives on this runner
+        run: |
+          version=151.0.7922.138
+          digest=f2c1d48c310a2fc79aad59e985103902f27b70fd186b3f663ee67c4c722f5566
+          archive="${RUNNER_TEMP}/chrome-for-testing.zip"
+          url="https://storage.googleapis.com/chrome-for-testing-public/${version}/linux64/chrome-linux64.zip"
+          curl --fail --silent --show-error --location --retry 3 --output "${archive}" "${url}"
+          echo "${digest}  ${archive}" | sha256sum --check --strict -
+          unzip -q "${archive}" -d "${RUNNER_TEMP}/engine"
+          engine="${RUNNER_TEMP}/engine/chrome-linux64/chrome"
+          test -x "${engine}"
+          echo "DEAL_SENTINEL_BROWSER=${engine}" >> "${GITHUB_ENV}"
+          "${engine}" --version
+
       - name: Run the repository's full test target
         run: pnpm run test 2>&1 | tee test-output.txt
 

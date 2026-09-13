@@ -129,22 +129,26 @@
  * back.
  */
 
+import type { RequestOutcomeClass } from "@deal-sentinel/shared";
+
 import { hostKey } from "./config.ts";
 import type { BreakerSettings, GovernorConfig } from "./config.ts";
 import { AllowanceLedger } from "./allowance.ts";
 import type { AllowanceReservation, AllowanceStore } from "./allowance.ts";
 import { Breaker } from "./breaker.ts";
-import type { OutcomeClass } from "./breaker.ts";
+import type { BreakerStatus, OutcomeClass } from "./breaker.ts";
 import { InvalidRequestError } from "./errors.ts";
 import type { RefusalReason } from "./errors.ts";
 import { HostScheduler } from "./host-scheduler.ts";
 import type { Release } from "./host-scheduler.ts";
+import { describeRecordingFailure } from "./outcome-sink.ts";
 import { LIVE_TRANSPORT } from "./ports.ts";
 import type {
   Clock,
   HttpTransport,
   Notifier,
   RandomSource,
+  RequestOutcomeSink,
   TransportChoice,
   TransportResponse,
 } from "./ports.ts";
@@ -231,7 +235,45 @@ export type GovernorDependencies = {
   transport: TransportChoice;
   notifier: Notifier;
   allowanceStore: AllowanceStore;
+  /**
+   * Where every completed request's outcome is recorded. Required, like every
+   * other port here: a governor that quietly recorded nothing would report a
+   * silent source as a healthy one.
+   */
+  outcomes: RequestOutcomeSink;
 };
+
+/**
+ * The statuses a host uses to say "not you, not now".
+ *
+ * Kept apart from an ordinary 4xx because they mean something different to an
+ * owner reading a rate: a 404 is a listing that moved and a 403 is a door being
+ * closed on the household's address. 451 is here because a legal block is still
+ * the other end declining, and 407 because a proxy refusing is not this
+ * system's own gate refusing.
+ */
+export const THIRD_PARTY_BLOCK_STATUSES: readonly number[] = [401, 403, 407, 429, 451];
+
+/**
+ * Which class a finished request belongs to.
+ *
+ * Every refusal this governor made itself is one class, whatever gate made it:
+ * a robots decision, a paused breaker, a spent allowance, a host still held, an
+ * answer this governor declared expired, a host with no ceiling and a source it
+ * has never heard of. None of them put anything on the wire, so none of them is
+ * evidence about a third party, and reporting them as blocks would read as a
+ * retailer under pressure when it is a ceiling doing exactly its job.
+ */
+export function classifyRequestOutcome(outcome: GovernorOutcome): RequestOutcomeClass {
+  if (!outcome.ok) {
+    return outcome.reason === "transport-error" ? "transport-error" : "governor-refusal";
+  }
+  const status = outcome.response.status;
+  if (status < 400) return "success";
+  return THIRD_PARTY_BLOCK_STATUSES.includes(status)
+    ? "third-party-block"
+    : "third-party-error";
+}
 
 export class Governor {
   readonly #config: GovernorConfig;
@@ -242,6 +284,7 @@ export class Governor {
   readonly #breaker: Breaker;
   readonly #allowance: AllowanceLedger;
   readonly #robots: RobotsGate;
+  readonly #outcomes: RequestOutcomeSink;
 
   constructor(dependencies: GovernorDependencies) {
     this.#config = dependencies.config;
@@ -254,6 +297,7 @@ export class Governor {
         ? createFetchTransport()
         : dependencies.transport;
     this.#notifier = dependencies.notifier;
+    this.#outcomes = dependencies.outcomes;
 
     this.#scheduler = new HostScheduler({
       clock: dependencies.clock,
@@ -288,6 +332,54 @@ export class Governor {
    * a check with a hole in it.
    */
   async request(request: GovernedRequest): Promise<GovernorOutcome> {
+    // The boundary the record is measured across, and the one place it is
+    // taken: `#decide` has nine ways out and wrapping it is what makes "one
+    // record per request, no sampling" a property of this method rather than of
+    // nine call sites. The governor's own `/robots.txt` retrieval goes through
+    // `#send` directly and is therefore NOT a second record: it is part of the
+    // cost of the request that needed it, and its duration is already inside
+    // the elapsed time measured here.
+    const startedAt = this.#clock.now();
+    const outcome = await this.#decide(request);
+    await this.#recordRequestOutcome(request.sourceId, outcome, startedAt);
+    return outcome;
+  }
+
+  /**
+   * Record what this request did, and never let that recording cost anything.
+   *
+   * A store is a thing that goes away. If writing the record throws, the
+   * failure is handed to the sink's own reporter and the caller still receives
+   * the outcome it earned - which is what keeps an observation write that this
+   * result feeds from being lost to a database hiccup. Price history cannot be
+   * backfilled; a missing row in the outcome record is one line of a report.
+   */
+  async #recordRequestOutcome(
+    sourceId: string,
+    outcome: GovernorOutcome,
+    startedAt: number,
+  ): Promise<void> {
+    const elapsed = this.#clock.now() - startedAt;
+    const recorded = {
+      sourceId,
+      outcomeClass: classifyRequestOutcome(outcome),
+      // Whole milliseconds, and never negative: a clock a caller supplied is
+      // not required to be monotonic, and a negative duration is not a fact.
+      durationMs: Math.max(0, Math.round(elapsed)),
+      recordedAt: new Date(this.#clock.now()),
+    };
+    try {
+      await this.#outcomes.record(recorded);
+    } catch (error) {
+      this.#outcomes.recordingFailed({
+        outcome: recorded,
+        error,
+        detail: describeRecordingFailure(recorded, error),
+      });
+    }
+  }
+
+  async #decide(request: GovernedRequest): Promise<GovernorOutcome> {
     const url = parseUrl(request.url);
     const host = hostKey(url);
 
@@ -374,6 +466,18 @@ export class Governor {
   /** Whether a host is currently held by back-pressure, for operator surfaces. */
   heldUntil(host: string): number {
     return this.#scheduler.heldUntil(host);
+  }
+
+  /**
+   * Whether a source is paused by its breaker right now, for the same audience.
+   *
+   * A READ of the gate's own answer - the identical call `#breakerGate` makes,
+   * so an operator surface and the chokepoint can never disagree about whether
+   * a source is paused. It authorises nothing: the answer has no `send` on it
+   * and the gate is asked again on the far side of every wait regardless.
+   */
+  pauseStatus(sourceId: string): BreakerStatus {
+    return this.#breaker.status(sourceId);
   }
 
   /**

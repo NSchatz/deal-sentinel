@@ -15,8 +15,9 @@ import { loadGovernorConfig } from "./config.ts";
 import type { GovernorConfig } from "./config.ts";
 import { Governor } from "./governor.ts";
 import type { AllowanceStore } from "./allowance.ts";
+import { discardingOutcomeSink } from "./outcome-sink.ts";
 import { LIVE_TRANSPORT, nullNotifier, systemClock, systemRandom } from "./ports.ts";
-import type { Clock, Notifier, RandomSource } from "./ports.ts";
+import type { Clock, Notifier, RandomSource, RequestOutcomeSink } from "./ports.ts";
 
 /**
  * The committed configuration file. Its numbers are conservative and
@@ -63,6 +64,13 @@ export function createSystemGovernor(options: {
   notifier?: Notifier;
   clock?: Clock;
   random?: RandomSource;
+  /**
+   * Where completed requests are recorded. A caller with a database hands one
+   * over `@deal-sentinel/db`'s store; a caller with none - a start check, a
+   * one-shot script - gets the discarding sink, whose counts are empty and are
+   * reported as empty rather than as a healthy zero.
+   */
+  outcomes?: RequestOutcomeSink;
 }): Governor {
   const config =
     options.config ?? loadGovernorConfig(options.configPath ?? DEFAULT_CONFIG_PATH);
@@ -77,5 +85,6 @@ export function createSystemGovernor(options: {
     transport: LIVE_TRANSPORT,
     notifier: options.notifier ?? nullNotifier,
     allowanceStore: options.allowanceStore,
+    outcomes: options.outcomes ?? discardingOutcomeSink,
   });
 }
