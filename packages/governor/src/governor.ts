@@ -263,10 +263,23 @@ export const THIRD_PARTY_BLOCK_STATUSES: readonly number[] = [401, 403, 407, 429
  * has never heard of. None of them put anything on the wire, so none of them is
  * evidence about a third party, and reporting them as blocks would read as a
  * retailer under pressure when it is a ceiling doing exactly its job.
+ *
+ * `robots-unreachable` IS THE ONE EXCEPTION, and it is not an exception to the
+ * rule so much as the rule applied honestly. `errors.ts` draws the line this
+ * follows: a refusal is "about US" or "about the HOST", and this one is about
+ * the host. The `/robots.txt` retrieval really went out and the transport really
+ * failed; nothing here decided anything. Filing it as a refusal makes a source
+ * whose host answers nobody read as this system declining, on the very operator
+ * surface built to tell those two apart - a rising refusal count beside
+ * `transport-error 0`. The gates AC-2 names by hand - the robots DECISION
+ * (`robots-disallowed`), the breaker (`source-paused`) and a spent allowance
+ * (`allowance-exhausted`) - are refusals and stay refusals.
  */
 export function classifyRequestOutcome(outcome: GovernorOutcome): RequestOutcomeClass {
   if (!outcome.ok) {
-    return outcome.reason === "transport-error" ? "transport-error" : "governor-refusal";
+    return outcome.reason === "transport-error" || outcome.reason === "robots-unreachable"
+      ? "transport-error"
+      : "governor-refusal";
   }
   const status = outcome.response.status;
   if (status < 400) return "success";

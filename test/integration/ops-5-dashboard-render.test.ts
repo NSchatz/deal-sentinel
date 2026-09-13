@@ -19,17 +19,35 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
+import {
+  memoryObservationSeries,
+  memoryRequestOutcomes,
+  memoryWatchlist,
+} from "@deal-sentinel/db";
+import type { ObservationSeriesPoint } from "@deal-sentinel/db";
 import { formatMinorUnits } from "@deal-sentinel/extractor";
+import { createMemoryAllowanceStore } from "@deal-sentinel/governor";
 import {
   DashboardOutputError,
   OUTPUT_UNWRITABLE_EXIT_CODE,
+  buildDashboardModel,
   renderDashboard,
   showInstant,
   unavailable,
   writeDashboard,
 } from "@deal-sentinel/ops";
+import type { DashboardModel } from "@deal-sentinel/ops";
 
-import { sampleDashboardModel } from "../support/ops-5-harness.ts";
+import { FakeClock } from "../support/fake-clock.ts";
+import {
+  DAY_MS,
+  MINUTE_MS,
+  NOW_MS,
+  noPauses,
+  sampleDashboardModel,
+  testOpsConfig,
+} from "../support/ops-5-harness.ts";
+import { bestBuyGovernorConfig } from "../support/source-3-harness.ts";
 import {
   BrowserEngineUnavailableError,
   DESKTOP_WIDTH,
@@ -332,6 +350,129 @@ describe("AC-13, AC-14 and AC-15: the series, as drawn and as text", () => {
         `${instant} is shown with no time zone beside it`,
       );
     }
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * AC-13, graded through the REAL builder rather than a hand-built model
+ * ------------------------------------------------------------------ */
+
+/**
+ * The four instants the window question is asked at, and the answer.
+ *
+ * `sampleDashboardModel` is built by hand, so every criterion graded against it
+ * grades the RENDERER and never `buildDashboardModel`'s handoff from the stores
+ * to the page. This block closes that: rows go into a store, the real builder
+ * reads them over the window it will print, and the marks are counted in the
+ * engine. The expectation below is computed from the SEEDED instants by the rule
+ * the page's own header claims - not from the model the builder returned, which
+ * would be comparing the builder against itself.
+ */
+const SERIES_WINDOW_START = NOW_MS - 7 * DAY_MS;
+const SEEDED_AT = [
+  SERIES_WINDOW_START - MINUTE_MS,
+  SERIES_WINDOW_START,
+  NOW_MS - DAY_MS,
+  NOW_MS,
+];
+/** `[start, end)`: the instant at the start is held, the one at the end is not. */
+const IN_WINDOW_AT = SEEDED_AT.filter((at) => at >= SERIES_WINDOW_START && at < NOW_MS);
+const BUILT_LISTING = "8880044";
+const BUILT_SOURCE = "bestbuy-api";
+
+function seededPoints(): ObservationSeriesPoint[] {
+  return SEEDED_AT.map((at, index) => ({
+    amountMinorUnits: BigInt(9999 + index * 1000),
+    currency: "USD",
+    observedAt: new Date(at),
+    availability: "InStock",
+  }));
+}
+
+async function buildRealModel(): Promise<DashboardModel> {
+  return await buildDashboardModel({
+    config: testOpsConfig(),
+    governorConfig: bestBuyGovernorConfig({ sources: { [BUILT_SOURCE]: {} } }),
+    outcomes: memoryRequestOutcomes(
+      SEEDED_AT.map((at) => ({
+        sourceId: BUILT_SOURCE,
+        outcomeClass: "success" as const,
+        durationMs: 12,
+        recordedAt: new Date(at),
+      })),
+    ),
+    allowance: createMemoryAllowanceStore(),
+    pauses: noPauses,
+    clock: new FakeClock(NOW_MS),
+    watchlist: memoryWatchlist([
+      { sourceId: BUILT_SOURCE, listingId: BUILT_LISTING, enabled: true },
+    ]),
+    series: memoryObservationSeries({ [BUILT_LISTING]: seededPoints() }),
+  });
+}
+
+/** The instants the engine actually drew a mark at, for one listing. */
+function drawnAt(reading: PageReading, listingId: string): number[] {
+  return reading.marks
+    .filter((mark) => mark.data["data-listing"] === listingId)
+    .map((mark) => Number(mark.data["data-at"]))
+    .sort((left, right) => left - right);
+}
+
+describe("AC-13 through the real builder: the window the page prints is the window it draws", () => {
+  it("draws a mark for every seeded observation inside the printed window, and none outside", async () => {
+    const model = await buildRealModel();
+    const reading = await readRenderedPage(renderDashboard(model));
+
+    // The window is read back off the RENDERED page, so "the window the page
+    // prints" is measured rather than assumed.
+    const printed =
+      `window ${showInstant(new Date(SERIES_WINDOW_START), model.timeZone)} ` +
+      `to ${showInstant(new Date(NOW_MS), model.timeZone)}`;
+    assert.ok(
+      reading.visibleText.includes(printed),
+      `the page does not print the window this case is about (${printed})`,
+    );
+
+    assert.deepEqual(
+      drawnAt(reading, BUILT_LISTING),
+      IN_WINDOW_AT,
+      "the marks drawn are not the observations the printed window holds",
+    );
+    // The counts on the same page answer the same question the same way: four
+    // records at the same four instants, and the same two are inside.
+    assert.match(reading.visibleText, /success 2\b/);
+  });
+
+  it("goes red when the series is read by the other window convention", async () => {
+    // The mutation is exactly the defect: the same seeded rows, filtered by
+    // `start < observedAt <= end` - which drops the observation at the start and
+    // draws the one at the end - rendered and measured the same way. Without
+    // this, the case above could pass over a page that never had a boundary
+    // observation to lose.
+    const model = await buildRealModel();
+    const otherConvention = seededPoints().filter(
+      (point) =>
+        point.observedAt.getTime() > SERIES_WINDOW_START &&
+        point.observedAt.getTime() <= NOW_MS,
+    );
+    const mutated = await readRenderedPage(
+      renderDashboard({
+        ...model,
+        listings: [{ sourceId: BUILT_SOURCE, listingId: BUILT_LISTING, points: otherConvention }],
+      }),
+    );
+
+    assert.throws(
+      () =>
+        assert.deepEqual(
+          drawnAt(mutated, BUILT_LISTING),
+          IN_WINDOW_AT,
+          "the marks drawn are not the observations the printed window holds",
+        ),
+      /the marks drawn are not the observations the printed window holds/,
+      "the check cannot see the defect it exists to catch",
+    );
   });
 });
 

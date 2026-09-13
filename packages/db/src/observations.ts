@@ -26,7 +26,7 @@
  * somebody else's history.
  */
 
-import { and, asc, eq, gt, lte } from "drizzle-orm";
+import { and, asc, eq, gt, gte, lt, lte } from "drizzle-orm";
 
 import type { HistoryDatabase } from "./connection.ts";
 import { priceObservations } from "./schema.ts";
@@ -93,13 +93,30 @@ export type ObservationSeriesPoint = ObservationPoint & {
   availability: string | null;
 };
 
-/** The narrow port an operator surface reads a listing's history through. */
+/**
+ * The narrow port an operator surface reads a listing's history through.
+ *
+ * THE OTHER WINDOW RULE, AND WHY THIS ONE DIFFERS FROM `windowFor`. A rule
+ * evaluation owns its window and only ever asks about one: `windowFor` is
+ * exclusive at the low end so that a window of exactly `windowMs` ending at an
+ * instant holds that instant and not the one `windowMs` earlier. A SURFACE owns
+ * no window - it is handed the one the page prints, the same `[start, end)` the
+ * outcome counts answer for - and it must answer for exactly that window and no
+ * other, because the page draws a single sentence over both reads. Two reads
+ * under one printed window is the defect this signature exists to prevent: the
+ * method is named for the rule it keeps and takes `start`/`end` rather than
+ * `after`/`until`, so a caller that means one cannot silently get the other.
+ */
 export type ObservationSeriesStore = {
-  /** The same window rule as `windowFor`: `after < observedAt <= until`. */
-  seriesFor(
+  /**
+   * Every observation for this listing with `start <= observedAt < end`, oldest
+   * first. Half open at the top, closed at the bottom - the convention the
+   * request-outcome counts answer by and the page prints.
+   */
+  seriesWithin(
     listingId: string,
-    after: Date,
-    until: Date,
+    start: Date,
+    end: Date,
   ): Promise<ObservationSeriesPoint[]>;
 };
 
@@ -107,7 +124,7 @@ export function drizzleObservationSeries(
   database: HistoryDatabase,
 ): ObservationSeriesStore {
   return {
-    async seriesFor(listingId, after, until) {
+    async seriesWithin(listingId, start, end) {
       return await database
         .select({
           amountMinorUnits: priceObservations.amountMinorUnits,
@@ -119,8 +136,8 @@ export function drizzleObservationSeries(
         .where(
           and(
             eq(priceObservations.listingId, listingId),
-            gt(priceObservations.observedAt, after),
-            lte(priceObservations.observedAt, until),
+            gte(priceObservations.observedAt, start),
+            lt(priceObservations.observedAt, end),
           ),
         )
         .orderBy(asc(priceObservations.observedAt));
@@ -128,19 +145,19 @@ export function drizzleObservationSeries(
   };
 }
 
-/** The same read in memory, for a caller with no database. */
+/** The same read in memory, answering by the same rule, for a caller with no database. */
 export function memoryObservationSeries(
   rows: Readonly<Record<string, readonly ObservationSeriesPoint[]>>,
 ): ObservationSeriesStore {
   return {
-    seriesFor(listingId, after, until) {
+    seriesWithin(listingId, start, end) {
       const held = rows[listingId] ?? [];
       return Promise.resolve(
         held
           .filter(
             (point) =>
-              point.observedAt.getTime() > after.getTime() &&
-              point.observedAt.getTime() <= until.getTime(),
+              point.observedAt.getTime() >= start.getTime() &&
+              point.observedAt.getTime() < end.getTime(),
           )
           .sort((left, right) => left.observedAt.getTime() - right.observedAt.getTime())
           .map((point) => ({ ...point })),

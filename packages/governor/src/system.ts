@@ -15,7 +15,6 @@ import { loadGovernorConfig } from "./config.ts";
 import type { GovernorConfig } from "./config.ts";
 import { Governor } from "./governor.ts";
 import type { AllowanceStore } from "./allowance.ts";
-import { discardingOutcomeSink } from "./outcome-sink.ts";
 import { LIVE_TRANSPORT, nullNotifier, systemClock, systemRandom } from "./ports.ts";
 import type { Clock, Notifier, RandomSource, RequestOutcomeSink } from "./ports.ts";
 
@@ -65,12 +64,15 @@ export function createSystemGovernor(options: {
   clock?: Clock;
   random?: RandomSource;
   /**
-   * Where completed requests are recorded. A caller with a database hands one
-   * over `@deal-sentinel/db`'s store; a caller with none - a start check, a
-   * one-shot script - gets the discarding sink, whose counts are empty and are
-   * reported as empty rather than as a healthy zero.
+   * Where completed requests are recorded. REQUIRED, and deliberately so: this
+   * is the wiring that hands over the live transport, so a governor built here
+   * sends real requests from the household's address, and a default would let a
+   * caller send them while durably recording nothing. A caller with a database
+   * hands over `@deal-sentinel/db`'s store; a caller with none - a start check,
+   * a one-shot script - passes `discardingOutcomeSink` EXPLICITLY, which is a
+   * decision visible at the call site rather than one buried in a default.
    */
-  outcomes?: RequestOutcomeSink;
+  outcomes: RequestOutcomeSink;
 }): Governor {
   const config =
     options.config ?? loadGovernorConfig(options.configPath ?? DEFAULT_CONFIG_PATH);
@@ -85,6 +87,6 @@ export function createSystemGovernor(options: {
     transport: LIVE_TRANSPORT,
     notifier: options.notifier ?? nullNotifier,
     allowanceStore: options.allowanceStore,
-    outcomes: options.outcomes ?? discardingOutcomeSink,
+    outcomes: options.outcomes,
   });
 }

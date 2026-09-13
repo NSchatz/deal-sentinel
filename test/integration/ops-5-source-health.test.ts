@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  drizzleObservationSeries,
   memoryObservationSeries,
   memoryRequestOutcomes,
   memorySourceStops,
@@ -40,6 +41,7 @@ import {
   HOUR_MS,
   MINUTE_MS,
   NOW_MS,
+  capturingDatabase,
   noPauses,
   testOpsConfig,
   unreadableOutcomeStore,
@@ -425,6 +427,80 @@ describe("the page model, built from the same stores", () => {
     // Every other source still carries its figures.
     const other = model.sources.find((card) => card.sourceId === UNMETERED);
     assert.equal(other?.state.known, true);
+  });
+
+  it("reads the series over the SAME window it prints, at both ends", async () => {
+    // The defect this is the guard for: the page prints one window and the
+    // builder handed it to a read answering by the other convention, so an
+    // observation at exactly the start was counted and not drawn. Both ends are
+    // asserted, because closing one end by shifting the window opens the other.
+    const clock = new FakeClock(NOW_MS);
+    const windowStart = NOW_MS - 7 * DAY_MS;
+    const point = (at: number, minorUnits: bigint) => ({
+      amountMinorUnits: minorUnits,
+      currency: "USD",
+      observedAt: new Date(at),
+      availability: "InStock",
+    });
+
+    const model = await buildDashboardModel({
+      ...deps({
+        clock,
+        // The SAME four instants the observations sit at, so the two halves of
+        // the page are asked the identical question and must give the identical
+        // answer: the first and last are outside, the middle two inside.
+        outcomes: memoryRequestOutcomes([
+          success(METERED, windowStart - MINUTE_MS),
+          success(METERED, windowStart),
+          success(METERED, NOW_MS - DAY_MS),
+          success(METERED, NOW_MS),
+        ]),
+      }),
+      watchlist: memoryWatchlist([{ sourceId: METERED, listingId: "8880044", enabled: true }]),
+      series: memoryObservationSeries({
+        "8880044": [
+          point(windowStart - MINUTE_MS, 11999n),
+          point(windowStart, 12999n),
+          point(NOW_MS - DAY_MS, 9999n),
+          point(NOW_MS, 14999n),
+        ],
+      }),
+    });
+
+    assert.equal(model.window.start.getTime(), windowStart);
+    assert.equal(model.window.end.getTime(), NOW_MS);
+
+    assert.deepEqual(
+      model.listings[0].points.map((held) => held.observedAt.getTime()),
+      [windowStart, NOW_MS - DAY_MS],
+      "the series the page draws is not the observations inside the window it prints",
+    );
+
+    // And the counts beside it agree, which is the whole point: one printed
+    // window, one membership rule, both halves of the page under it. Four
+    // records at the four instants above, and the same two are inside.
+    const card = model.sources.find((source) => source.sourceId === METERED);
+    assert.equal(
+      card?.counts.known === true && card.counts.value.counts.success,
+      2,
+      "the counts and the chart disagree about which instants the window holds",
+    );
+  });
+
+  it("sends that same half-open window to the database", async () => {
+    const capturing = capturingDatabase();
+    await drizzleObservationSeries(capturing.database).seriesWithin(
+      "8880044",
+      new Date(NOW_MS - DAY_MS),
+      new Date(NOW_MS),
+    );
+
+    const [statement] = capturing.against("price_observations");
+    assert.match(statement.text, /"observed_at" >= \$2/);
+    assert.match(statement.text, /"observed_at" < \$3/);
+    // The rule read a rule evaluation answers by is the OTHER one, and it is
+    // untouched: a surface and a rule must not silently share a window rule.
+    assert.doesNotMatch(statement.text, /"observed_at" > \$|"observed_at" <= \$/);
   });
 
   it("fails rather than drawing when the watchlist cannot be read", async () => {

@@ -21,7 +21,11 @@ import { describe, it } from "node:test";
 import { memoryRequestOutcomes, recordObservation } from "@deal-sentinel/db";
 import type { RequestOutcome } from "@deal-sentinel/db";
 import { drizzleRequestOutcomes, requestOutcomes } from "@deal-sentinel/db";
-import { classifyRequestOutcome } from "@deal-sentinel/governor";
+import {
+  classifyRequestOutcome,
+  createMemoryAllowanceStore,
+  createSystemGovernor,
+} from "@deal-sentinel/governor";
 import { bestBuyAdapter } from "@deal-sentinel/sources";
 import { REQUEST_OUTCOME_CLASSES } from "@deal-sentinel/shared";
 
@@ -38,6 +42,7 @@ import {
 import {
   BESTBUY_BASE_URL,
   TEST_CREDENTIAL,
+  bestBuyGovernorConfig,
   fixtureAnswer,
   limitExceededAnswer,
   readVendorFixture,
@@ -134,6 +139,58 @@ describe("AC-1: every request through the chokepoint leaves exactly one record",
     assert.equal(statements.length, 1);
     assert.match(statements[0].text, /^insert into "request_outcomes"/);
     assert.doesNotMatch(statements[0].text, /on conflict|update/i);
+  });
+});
+
+describe("AC-1: the production wiring cannot be built without somewhere to record", () => {
+  /**
+   * `createSystemGovernor` is the one builder that hands over the live
+   * transport, so a governor built there sends real requests from the
+   * household's address. An OPTIONAL sink there means a caller can send for
+   * real and durably record nothing, and be given a page of healthy zeros for
+   * it. The dependency is required, and these are the two halves of that:
+   * that it is really wired, and that it cannot quietly stop being required.
+   */
+  it("records through the sink it was handed, with nothing reaching the wire", async () => {
+    const outcomes = recordingOutcomeSink();
+    const governor = createSystemGovernor({
+      allowanceStore: createMemoryAllowanceStore(),
+      // A configuration naming no host at all, so the first gate refuses before
+      // the transport is ever reached. Nothing here leaves this process.
+      config: bestBuyGovernorConfig({ hosts: {}, sources: { [SOURCE]: {} } }),
+      clock: new FakeClock(NOW_MS),
+      outcomes,
+    });
+
+    const outcome = await governor.request({ url: productUrl(SKU), sourceId: SOURCE });
+
+    assert.equal(outcome.ok, false);
+    assert.equal(
+      outcome.ok === false && outcome.reason,
+      "unconfigured-host",
+      "this case only stays offline while the refusal comes before the transport",
+    );
+    assert.deepEqual(
+      outcomes.recorded.map((record) => record.outcomeClass),
+      ["governor-refusal"],
+      "the production wiring did not record through the sink it was given",
+    );
+  });
+
+  it("refuses to compile without one, so no default can come back", () => {
+    // This is graded by `pnpm run typecheck`, not at run time: if `outcomes`
+    // ever goes back to optional, the expectation below stops being an error
+    // and TypeScript reds the build for an UNUSED @ts-expect-error. A check
+    // that fires when the defect returns, rather than a comment asking nicely.
+    const build = (): unknown =>
+      // @ts-expect-error - `outcomes` is required: a governor wired to the live
+      // transport may not be built with nowhere to record what it sent.
+      createSystemGovernor({
+        allowanceStore: createMemoryAllowanceStore(),
+        config: bestBuyGovernorConfig({ hosts: {}, sources: { [SOURCE]: {} } }),
+        clock: new FakeClock(NOW_MS),
+      });
+    assert.equal(typeof build, "function");
   });
 });
 
@@ -255,12 +312,21 @@ describe("AC-2: a refusal this system made is never a third party blocking it", 
     assert.equal(classifyRequestOutcome(response(429)), "third-party-block");
     assert.equal(classifyRequestOutcome(response(404)), "third-party-error");
     assert.equal(classifyRequestOutcome(response(500)), "third-party-error");
+    // The three gates AC-2 names by hand come first, so the criterion's own
+    // letter is asserted rather than inferred from a list: the robots DECISION,
+    // the breaker, and a spent allowance.
+    for (const reason of ["robots-disallowed", "source-paused", "allowance-exhausted"] as const) {
+      const named = classifyRequestOutcome({ ok: false, reason, detail: "" });
+      assert.equal(named, "governor-refusal", `${reason} is not recorded as our own refusal`);
+      assert.notEqual(named, "third-party-block");
+      assert.notEqual(named, "transport-error");
+    }
+
     for (const reason of [
       "unconfigured-host",
       "unknown-source",
       "source-paused",
       "allowance-exhausted",
-      "robots-unreachable",
       "robots-disallowed",
       "robots-stale",
       "host-held",
@@ -274,6 +340,15 @@ describe("AC-2: a refusal this system made is never a third party blocking it", 
     assert.equal(
       classifyRequestOutcome({ ok: false, reason: "transport-error", detail: "" }),
       "transport-error",
+    );
+    // A host whose robots.txt could not be retrieved is a fact about that host,
+    // not a ceiling this system applied: the retrieval left and the transport
+    // failed. Filed as a refusal it would show as `transport-error 0` beside a
+    // climbing refusal count, which reads as this system declining to ask.
+    assert.equal(
+      classifyRequestOutcome({ ok: false, reason: "robots-unreachable", detail: "" }),
+      "transport-error",
+      "a host that answered nobody is filed as a refusal this system chose",
     );
   });
 });

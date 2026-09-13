@@ -134,10 +134,17 @@ export async function buildDashboardModel(
       dependencies.watchlist.enabledFor(sourceId),
     );
     for (const entry of entries) {
+      // ONE WINDOW, ONE MEMBERSHIP RULE. `health.window` is the window this page
+      // prints in its header and answers its counts for, `[start, end)`. The
+      // series is read over that same window and by that same rule, so an
+      // observation at exactly the start is drawn and one at exactly the end is
+      // not, which is what the counts beside it already do. A read answering by
+      // any other convention would make the page's single printed sentence false
+      // at one end or the other.
       const points = await readOrRefuse(
         `the price history for ${entry.listingId}`,
         () =>
-          dependencies.series.seriesFor(
+          dependencies.series.seriesWithin(
             entry.listingId,
             health.window.start,
             health.window.end,
