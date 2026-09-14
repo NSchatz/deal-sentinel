@@ -13,6 +13,22 @@ export class GovernorConfigError extends Error {
   }
 }
 
+/**
+ * The configuration file could not be READ at all. A subclass, so every caller
+ * that already handles a `GovernorConfigError` keeps handling this one, and the
+ * commands that want to answer 2 for "the path you named is not there" and 3
+ * for "the file I read says no" can tell the two apart (`cli` L1).
+ */
+export class GovernorConfigUnreadableError extends GovernorConfigError {
+  readonly path: string;
+
+  constructor(configPath: string, detail: string) {
+    super(detail);
+    this.name = "GovernorConfigUnreadableError";
+    this.path = configPath;
+  }
+}
+
 /** A caller handed the governor something that is not a fetchable URL. */
 export class InvalidRequestError extends Error {
   constructor(detail: string) {

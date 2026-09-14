@@ -53,6 +53,9 @@ importers:
       '@deal-sentinel/governor':
         specifier: '*'
         version: link:../governor
+      '@deal-sentinel/shared':
+        specifier: '*'
+        version: link:../shared
 
   packages/db:
     dependencies:

@@ -37,7 +37,11 @@ export type {
   SourceSettings,
 } from "./config.ts";
 
-export { GovernorConfigError, InvalidRequestError } from "./errors.ts";
+export {
+  GovernorConfigError,
+  GovernorConfigUnreadableError,
+  InvalidRequestError,
+} from "./errors.ts";
 
 export { AllowanceLedger, periodStartFor } from "./allowance.ts";
 export type {

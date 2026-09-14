@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Restore the price history from a pg_dump custom-format dump.
+# pnpm db:restore - restore the price history from a pg_dump custom-format dump.
 #
-#   HISTORY_DATABASE_URL=postgres://user:pass@host:5432/deal_sentinel_history \
-#     packages/db/scripts/restore.sh backups/deal-sentinel-history-....dump
+# usage: HISTORY_DATABASE_URL=postgres://user:pass@host:5432/deal_sentinel_history \
+#          packages/db/scripts/restore.sh DUMP_FILE
 #
 # The target is expected to be an EMPTY database on a freshly created volume:
 # the ordinary recovery is "the volume is gone, make a new one, restore into
@@ -15,6 +15,13 @@
 # request: this script is the thing you run when the history you have is the
 # one you want to replace. It is refused unless the dump exists and is
 # readable.
+#
+# Arguments:
+#   DUMP_FILE              required. The pg_dump custom-format archive to read.
+#
+# Flags:
+#   -h, --help             print this help, with every exit code and its
+#                          meaning, and exit 0
 #
 # Environment:
 #   HISTORY_DATABASE_URL   required. libpq URL of the database to restore INTO.
@@ -29,15 +36,54 @@
 #                          docs/decisions/0005-container-image-pinning.md.
 #   HISTORY_PG_NETWORK     docker network to attach the runner container to.
 #
+# Exit codes:
+#   0  it ran and the answer is yes
+#   1  it could not run or could not finish
+#   2  the caller got the invocation wrong
+#   3  it ran, every input was legible, and a constraint said no
+#
+# Example:
+#   HISTORY_DATABASE_URL=postgres://sentinel@127.0.0.1:5432/deal_sentinel_history \
+#     packages/db/scripts/restore.sh backups/history.dump
+#
 # The URL is never written to a command line this script controls: the docker
 # runner forwards the variable by name, so the password does not appear in
 # `docker inspect` or in this host's process list.
 set -euo pipefail
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || $# -eq 0 ]]; then
-  grep '^#' "$0" | sed 's/^#\{1,2\} \{0,1\}//'
-  [[ $# -eq 0 ]] && exit 2
-  exit 0
+help_text() {
+  grep '^#' "$0" | sed '1d;s/^#\{1,2\} \{0,1\}//'
+}
+
+usage_error() {
+  echo "restore: $1" >&2
+  help_text >&2
+  exit 2
+}
+
+dump=""
+positional=0
+for argument in "$@"; do
+  case "$argument" in
+    -h | --help)
+      help_text
+      exit 0
+      ;;
+    -?*)
+      usage_error "unrecognized flag '${argument}'"
+      ;;
+    *)
+      positional=$((positional + 1))
+      if [[ "$positional" -gt 1 ]]; then
+        usage_error "${positional} arguments given and this command takes exactly 1 (DUMP_FILE)"
+      fi
+      dump="$argument"
+      ;;
+  esac
+done
+
+if [[ "$positional" -eq 0 ]]; then
+  usage_error "missing required argument DUMP_FILE"
 fi
 
 if [[ -z "${HISTORY_DATABASE_URL:-}" ]]; then
@@ -45,7 +91,6 @@ if [[ -z "${HISTORY_DATABASE_URL:-}" ]]; then
   exit 2
 fi
 
-dump="$1"
 if [[ ! -r "$dump" ]]; then
   echo "restore: cannot read dump file '${dump}'." >&2
   exit 2
@@ -63,11 +108,18 @@ if [[ -z "$runner" ]]; then
   fi
 fi
 
+step_failed() {
+  echo "restore: the pg_restore step failed (runner: ${runner}, status ${1})." >&2
+  echo "restore: the restore ran in a single transaction, so the target is as it was. This is not a refusal and not a usage error: the command could not finish." >&2
+  exit 1
+}
+
 redacted="$(printf '%s' "$HISTORY_DATABASE_URL" | sed -E 's#//([^:@/]+):[^@/]*@#//\1:***@#')"
 echo "restore: restoring ${dump_dir}/${dump_name} into ${redacted} (runner: ${runner})"
 
 case "$runner" in
   local)
+    status=0
     pg_restore \
       --clean \
       --if-exists \
@@ -75,7 +127,8 @@ case "$runner" in
       --no-privileges \
       --single-transaction \
       --dbname "$HISTORY_DATABASE_URL" \
-      "${dump_dir}/${dump_name}"
+      "${dump_dir}/${dump_name}" || status=$?
+    [[ "$status" -eq 0 ]] || step_failed "$status"
     ;;
   docker)
     image="${HISTORY_PG_IMAGE:-postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685}"
@@ -89,6 +142,7 @@ case "$runner" in
     if [[ -n "${HISTORY_PG_NETWORK:-}" ]]; then
       network_args=(--network "$HISTORY_PG_NETWORK")
     fi
+    status=0
     docker run --rm \
       "${network_args[@]}" \
       --user "$(id -u):$(id -g)" \
@@ -96,7 +150,8 @@ case "$runner" in
       -e HISTORY_DATABASE_URL \
       -e "HISTORY_DUMP_NAME=${dump_name}" \
       "$image" \
-      sh -c 'exec pg_restore --clean --if-exists --no-owner --no-privileges --single-transaction --dbname "$HISTORY_DATABASE_URL" "/backup/${HISTORY_DUMP_NAME}"'
+      sh -c 'exec pg_restore --clean --if-exists --no-owner --no-privileges --single-transaction --dbname "$HISTORY_DATABASE_URL" "/backup/${HISTORY_DUMP_NAME}"' || status=$?
+    [[ "$status" -eq 0 ]] || step_failed "$status"
     ;;
   *)
     echo "restore: unknown HISTORY_PG_RUNNER '${runner}' (expected local or docker)" >&2

@@ -22,6 +22,7 @@ export type { ObservationDraft, SourceAdapter, SourceOutcome } from "./adapter.t
 export {
   MissingCredentialError,
   SourceConfigError,
+  SourceConfigUnreadableError,
   UnattributedEmissionError,
 } from "./errors.ts";
 

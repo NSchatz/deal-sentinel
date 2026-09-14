@@ -15,6 +15,7 @@
   "dependencies": {
     "@deal-sentinel/db": "*",
     "@deal-sentinel/extractor": "*",
-    "@deal-sentinel/governor": "*"
+    "@deal-sentinel/governor": "*",
+    "@deal-sentinel/shared": "*"
   }
 }

@@ -17,7 +17,11 @@
  * fails the suite if any file under this package names an HTTP client at all.
  */
 
-export { AlertConfigError, MissingChannelCredentialError } from "./errors.ts";
+export {
+  AlertConfigError,
+  AlertConfigUnreadableError,
+  MissingChannelCredentialError,
+} from "./errors.ts";
 
 export { evaluateWindowLow } from "./rules.ts";
 export type { PricePoint, RuleRefusal, RuleVerdict, WindowLowRule } from "./rules.ts";

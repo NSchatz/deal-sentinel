@@ -35,7 +35,7 @@ import { normaliseCurrency } from "@deal-sentinel/extractor";
 import { hostKey } from "@deal-sentinel/governor";
 import type { GovernorConfig } from "@deal-sentinel/governor";
 
-import { SourceConfigError } from "./errors.ts";
+import { SourceConfigError, SourceConfigUnreadableError } from "./errors.ts";
 import { isValidTimeZone } from "./time-zone.ts";
 import { termsFor } from "./terms.ts";
 import type { SourceTerms } from "./terms.ts";
@@ -92,7 +92,8 @@ export function loadSourceRegistry(
   try {
     text = readFileSync(path, "utf8");
   } catch (error) {
-    throw new SourceConfigError(
+    throw new SourceConfigUnreadableError(
+      path,
       `the source configuration at ${path} could not be read, so no source ` +
         "has a currency, a time zone or a retention ceiling and none of them " +
         `runs: ${error instanceof Error ? error.message : String(error)}`,

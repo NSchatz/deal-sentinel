@@ -26,6 +26,22 @@ export class AlertConfigError extends Error {
 }
 
 /**
+ * The alert configuration file could not be READ at all. A subclass, so every
+ * caller that already handles an `AlertConfigError` keeps handling this one,
+ * and the command can answer 2 for "the path you named is not there" where it
+ * answers 3 for "the file I read says no" (`cli` L1).
+ */
+export class AlertConfigUnreadableError extends AlertConfigError {
+  readonly path: string;
+
+  constructor(configPath: string, detail: string) {
+    super(detail);
+    this.name = "AlertConfigUnreadableError";
+    this.path = configPath;
+  }
+}
+
+/**
  * The channel's credential is absent or empty where the configuration says it
  * is read from. Carries the VARIABLE NAME and never a value: this error exists
  * to be printed.
