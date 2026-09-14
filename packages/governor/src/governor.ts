@@ -260,26 +260,23 @@ export const THIRD_PARTY_BLOCK_STATUSES: readonly number[] = [401, 403, 407, 429
  * Every refusal this governor made itself is one class, whatever gate made it:
  * a robots decision, a paused breaker, a spent allowance, a host still held, an
  * answer this governor declared expired, a host with no ceiling and a source it
- * has never heard of. None of them put anything on the wire, so none of them is
- * evidence about a third party, and reporting them as blocks would read as a
- * retailer under pressure when it is a ceiling doing exactly its job.
+ * has never heard of. The request being classified never left for any of them,
+ * so none of them is evidence about a third party, and reporting them as blocks
+ * would read as a retailer under pressure when it is a ceiling doing its job.
  *
- * `robots-unreachable` IS THE ONE EXCEPTION, and it is not an exception to the
- * rule so much as the rule applied honestly. `errors.ts` draws the line this
- * follows: a refusal is "about US" or "about the HOST", and this one is about
- * the host. The `/robots.txt` retrieval really went out and the transport really
- * failed; nothing here decided anything. Filing it as a refusal makes a source
- * whose host answers nobody read as this system declining, on the very operator
- * surface built to tell those two apart - a rising refusal count beside
- * `transport-error 0`. The gates AC-2 names by hand - the robots DECISION
- * (`robots-disallowed`), the breaker (`source-paused`) and a spent allowance
- * (`allowance-exhausted`) - are refusals and stay refusals.
+ * `robots-unreachable` is one of those refusals and is NOT an exception. The
+ * retrieval that failed is a different request from the one recorded here: this
+ * record is the record of the request the governor then declined to send, and
+ * that request never left. What an owner needs to know about a host answering
+ * nobody - that the source is broken, and since when - is carried by health off
+ * the last successful request, which is where a fact about a HOST belongs.
+ *
+ * `transport-error` therefore means exactly one thing: the request this record
+ * is a record of left, and nothing came back.
  */
 export function classifyRequestOutcome(outcome: GovernorOutcome): RequestOutcomeClass {
   if (!outcome.ok) {
-    return outcome.reason === "transport-error" || outcome.reason === "robots-unreachable"
-      ? "transport-error"
-      : "governor-refusal";
+    return outcome.reason === "transport-error" ? "transport-error" : "governor-refusal";
   }
   const status = outcome.response.status;
   if (status < 400) return "success";

@@ -244,7 +244,7 @@ describe("AC-2: a refusal this system made is never a third party blocking it", 
     );
   });
 
-  it("records a request whose own robots retrieval left and failed as a transport error", async () => {
+  it("records a request refused after its own robots retrieval failed as this system's refusal", async () => {
     const clock = new FakeClock(NOW_MS);
     const harness = sourceHarness({
       clock,
@@ -272,9 +272,12 @@ describe("AC-2: a refusal this system made is never a third party blocking it", 
       ["/robots.txt"],
       "the request under test sent something other than its own robots retrieval",
     );
+    // AC-2, on the route it names first: the governor decided this for THIS
+    // request, off a retrieval made for it. The retrieval failed; the request
+    // itself never left, so neither forbidden class is a record of it.
     assert.deepEqual(
       harness.outcomes.recorded.map((record) => record.outcomeClass),
-      ["transport-error"],
+      ["governor-refusal"],
     );
   });
 
@@ -346,11 +349,15 @@ describe("AC-2: a refusal this system made is never a third party blocking it", 
     assert.equal(classifyRequestOutcome(response(429)), "third-party-block");
     assert.equal(classifyRequestOutcome(response(404)), "third-party-error");
     assert.equal(classifyRequestOutcome(response(500)), "third-party-error");
-    // The three gates AC-2 names by hand come first, so the criterion's own
-    // letter is asserted rather than inferred from a list: the decision a
-    // robots retrieval made for the request delivered, the breaker, and a
-    // spent allowance.
-    for (const reason of ["robots-disallowed", "source-paused", "allowance-exhausted"] as const) {
+    // The gates AC-2 names by hand come first, so the criterion's own letter is
+    // asserted rather than inferred from a list: a robots retrieval made for
+    // the request, whichever way it went, the breaker, and a spent allowance.
+    for (const reason of [
+      "robots-disallowed",
+      "robots-unreachable",
+      "source-paused",
+      "allowance-exhausted",
+    ] as const) {
       const named = classifyRequestOutcome({ ok: false, reason, detail: "" });
       assert.equal(named, "governor-refusal", `${reason} is not recorded as our own refusal`);
       assert.notEqual(named, "third-party-block");
@@ -363,6 +370,7 @@ describe("AC-2: a refusal this system made is never a third party blocking it", 
       "source-paused",
       "allowance-exhausted",
       "robots-disallowed",
+      "robots-unreachable",
       "robots-stale",
       "host-held",
     ] as const) {
@@ -372,20 +380,11 @@ describe("AC-2: a refusal this system made is never a third party blocking it", 
         `${reason} was not recorded as a refusal this system made`,
       );
     }
+    // The one reason left, and the only one this class is for: the request this
+    // record is a record of left the process and nothing came back.
     assert.equal(
       classifyRequestOutcome({ ok: false, reason: "transport-error", detail: "" }),
       "transport-error",
-    );
-    // A host whose robots.txt could not be retrieved is a fact about that host,
-    // not a ceiling this system applied: the retrieval left and the transport
-    // failed. Filed as a refusal it would show as `transport-error 0` beside a
-    // climbing refusal count, which reads as this system declining to ask. The
-    // wire-level case above is the one AC-2 binds; this assertion is here so the
-    // vocabulary has no reason without an explicit class.
-    assert.equal(
-      classifyRequestOutcome({ ok: false, reason: "robots-unreachable", detail: "" }),
-      "transport-error",
-      "a host that answered nobody is filed as a refusal this system chose",
     );
   });
 });
