@@ -41,6 +41,7 @@ import {
 import type {
   ConfigOverrides,
   RecordingNotifier,
+  RecordingOutcomeSink,
   RecordingTransport,
 } from "./governor-harness.ts";
 
@@ -224,6 +225,8 @@ export type SourceHarness = {
   allowanceStore: AllowanceStore;
   config: GovernorConfig;
   registry: SourceRegistry;
+  /** What the chokepoint recorded about every request this harness made. */
+  outcomes: RecordingOutcomeSink;
 };
 
 /**
@@ -241,6 +244,7 @@ export function sourceHarness(options: {
   registry?: SourceRegistry;
   clock?: FakeClock;
   allowanceStore?: AllowanceStore;
+  outcomes?: RecordingOutcomeSink;
 } = {}): SourceHarness {
   const clock = options.clock ?? new FakeClock();
   const transport = recordingTransport(
@@ -252,6 +256,7 @@ export function sourceHarness(options: {
     clock,
     config: options.config ?? bestBuyGovernorConfig(),
     allowanceStore: options.allowanceStore ?? createMemoryAllowanceStore(),
+    outcomes: options.outcomes,
   });
 
   return {
@@ -262,6 +267,7 @@ export function sourceHarness(options: {
     allowanceStore: built.allowanceStore,
     config: built.config,
     registry: options.registry ?? testRegistry(),
+    outcomes: built.outcomes,
   };
 }
 

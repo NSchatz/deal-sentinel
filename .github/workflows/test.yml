@@ -70,6 +70,55 @@ jobs:
       - name: Install exactly what the lockfile already names
         run: pnpm install --frozen-lockfile
 
+      # The render grader drives a real browser engine, so one has to BE here.
+      # The runner image ships a browser, and this step deliberately does not
+      # use it: what an image happens to carry moves under this repository with
+      # no diff, and the engine is the instrument every claim about what the
+      # dashboard shows is measured with. So an exact Chrome for Testing build
+      # is taken, checked against its digest, and refused if it does not match
+      # (pinning-conventions P1 and P6: a build that cannot resolve exactly
+      # what it pinned stops, and says so). Chrome for Testing keeps every
+      # published build, which is P5.
+      #
+      # P7 is why each check below carries its own exit status and message
+      # rather than the bare non-zero `-e` would give it. This repository runs
+      # no scheduled liveness check (P8), so the first symptom of a withdrawn
+      # build is a red step on an unrelated pull request, and the reader of that
+      # log needs to be told which of these four things went wrong without
+      # opening this file. The repository has no exit-code vocabulary of its
+      # own, so these four are local to this step and mean nothing elsewhere.
+      # Every message names the pinned version AND the URL, because one without
+      # the other does not say what to go and change.
+      - name: Put the exact browser engine the render grader drives on this runner
+        run: |
+          version=151.0.7922.138
+          digest=f2c1d48c310a2fc79aad59e985103902f27b70fd186b3f663ee67c4c722f5566
+          archive="${RUNNER_TEMP}/chrome-for-testing.zip"
+          url="https://storage.googleapis.com/chrome-for-testing-public/${version}/linux64/chrome-linux64.zip"
+          pin="pinned Chrome for Testing ${version} at ${url}"
+          curl --fail --silent --show-error --location --retry 3 --output "${archive}" "${url}" || {
+            echo "::error::11: could not retrieve the ${pin} - upstream is unreachable, or this build was withdrawn"
+            exit 11
+          }
+          echo "${digest}  ${archive}" | sha256sum --check --strict - || {
+            echo "::error::12: the ${pin} does not match the digest pinned beside it (${digest}) - the bytes served changed"
+            exit 12
+          }
+          unzip -q "${archive}" -d "${RUNNER_TEMP}/engine" || {
+            echo "::error::13: the ${pin} matched its digest but is not a readable archive"
+            exit 13
+          }
+          engine="${RUNNER_TEMP}/engine/chrome-linux64/chrome"
+          test -x "${engine}" || {
+            echo "::error::14: the ${pin} unpacked without an executable at chrome-linux64/chrome - its layout changed"
+            exit 14
+          }
+          "${engine}" --version || {
+            echo "::error::15: the ${pin} is present and executable but will not run on this runner"
+            exit 15
+          }
+          echo "DEAL_SENTINEL_BROWSER=${engine}" >> "${GITHUB_ENV}"
+
       - name: Run the repository's full test target
         run: pnpm run test 2>&1 | tee test-output.txt
 

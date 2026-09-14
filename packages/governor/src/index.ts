@@ -12,7 +12,12 @@
  * the suite if it tries.
  */
 
-export { Governor, MAX_BOUNDARY_WAITS } from "./governor.ts";
+export {
+  Governor,
+  MAX_BOUNDARY_WAITS,
+  THIRD_PARTY_BLOCK_STATUSES,
+  classifyRequestOutcome,
+} from "./governor.ts";
 export type {
   GovernedRequest,
   GovernedResponse,
@@ -77,11 +82,22 @@ export type {
   Notification,
   NotificationKind,
   Notifier,
+  OutcomeRecordingFailure,
   RandomSource,
+  RecordedRequestOutcome,
+  RequestOutcomeSink,
   TransportChoice,
   TransportRequest,
   TransportResponse,
 } from "./ports.ts";
+
+export {
+  OUTCOME_RECORDING_FAILURE_PREFIX,
+  createOutcomeSink,
+  describeRecordingFailure,
+  discardingOutcomeSink,
+  reportToStandardError,
+} from "./outcome-sink.ts";
 
 // The factory that builds a live HTTP transport is DELIBERATELY not here.
 // Exporting it published an ungoverned way out of the process: one import, one

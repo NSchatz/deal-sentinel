@@ -31,12 +31,14 @@
     "@deal-sentinel/db": "*",
     "@deal-sentinel/extractor": "*",
     "@deal-sentinel/governor": "*",
+    "@deal-sentinel/ops": "*",
     "@deal-sentinel/shared": "*",
     "@deal-sentinel/sources": "*",
     "@types/node": "22.10.2",
     "@types/pg": "8.11.10",
     "drizzle-kit": "0.30.1",
     "pg": "8.13.1",
+    "puppeteer-core": "25.10.0",
     "typescript": "5.7.2"
   }
 }

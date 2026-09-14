@@ -8,3 +8,9 @@ backups/
 # The restore proof makes one of these per run and removes it again. A crashed
 # run should not leave a dump staged for commit.
 backups-test-*/
+
+# The produced dashboard is derived from the store and regenerable at any time.
+# The directory it goes in IS committed, because the command that writes the
+# page refuses to create one.
+dashboard/*.html
+dashboard/*.partial-*

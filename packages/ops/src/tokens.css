@@ -1,0 +1,166 @@
+/*
+ * The one token file. Every colour and every spacing length on this
+ * repository's surface resolves to a token declared here (styling S1).
+ *
+ * THREE TIERS (S2). Primitives are raw values with no meaning. Semantic tokens
+ * assign a primitive a role, and only this tier may name a primitive. Component
+ * tokens bind a semantic to one part of the page. A rule in dashboard.css
+ * reaches for the semantic or the component tier and never for a primitive.
+ *
+ * BOTH THEMES ARE HAND-AUTHORED (S6). The dark values below are not derived
+ * from the light ones by any rule: each one was chosen and then measured. A
+ * derived theme misses contrast floors and the hand fixes land anyway, without
+ * the honesty of having been chosen.
+ *
+ * EVERY PAIR THAT MUST CLEAR A FLOOR CARRIES ITS MEASURED RATIO (S7), written
+ * as `ratio: <foreground> on <background> = N.NN:1` beside the token. Those are
+ * not decoration: test/unit/ops-5-style-tokens.test.ts recomputes each one from
+ * the values in this file and fails when a recorded figure and the values it
+ * claims to describe disagree, so a change that drops a pair below its floor is
+ * visible in the diff rather than discovered on a screen.
+ *
+ * SPACING IS THE 4px SCALE (S3) and nothing else.
+ *
+ * ONE ACCENT (S10). Every other colour here is neutral or a state token.
+ */
+
+:root {
+  /* ---------------------------------------------------------------- *
+   * Tier 1: primitives. Raw values, no meaning, named for what they are.
+   * ---------------------------------------------------------------- */
+  --ds-white: #ffffff;
+  --ds-paper: #f7f8fa;
+  --ds-ink-900: #12141a;
+  --ds-ink-700: #2b2f39;
+  --ds-ink-500: #53596a;
+  --ds-grey-300: #c9cdd6;
+  --ds-grey-200: #dfe2e8;
+  --ds-slate-900: #101319;
+  --ds-slate-800: #171b23;
+  --ds-slate-700: #232834;
+  --ds-slate-500: #3a4150;
+  --ds-mist-200: #d6dae3;
+  --ds-mist-100: #eef0f4;
+  --ds-teal-700: #00595f;
+  --ds-teal-300: #6fd6dd;
+  --ds-green-700: #1c6135;
+  --ds-green-300: #74d99a;
+  --ds-amber-800: #6d4700;
+  --ds-amber-300: #e8b45c;
+  --ds-red-700: #97112a;
+  --ds-red-300: #f3899b;
+
+  /* ---------------------------------------------------------------- *
+   * Tier 2: semantic. The role vocabulary every repository here shares.
+   * ---------------------------------------------------------------- */
+  /* ratio: --fg on --bg = 17.32:1 (floor 4.5) */
+  --bg: var(--ds-paper);
+  --panel: var(--ds-white);
+  --line: var(--ds-grey-200);
+  /* ratio: --fg on --panel = 18.41:1 (floor 4.5) */
+  --fg: var(--ds-ink-900);
+  /* ratio: --muted on --panel = 6.99:1 (floor 4.5) */
+  --muted: var(--ds-ink-500);
+  /* ratio: --accent on --panel = 8.09:1 (floor 4.5) */
+  --accent: var(--ds-teal-700);
+  /* ratio: --ok on --panel = 7.47:1 (floor 4.5) */
+  --ok: var(--ds-green-700);
+  /* ratio: --warn on --panel = 8.23:1 (floor 4.5) */
+  --warn: var(--ds-amber-800);
+  /* ratio: --bad on --panel = 8.64:1 (floor 4.5) */
+  --bad: var(--ds-red-700);
+  --border: var(--ds-grey-300);
+  /* ratio: --mark on --panel = 8.09:1 (floor 3) */
+  --mark: var(--ds-teal-700);
+  /* ratio: --focus on --panel = 8.09:1 (floor 3) */
+  --focus: var(--ds-teal-700);
+  /* ratio: --disabled on --panel = 6.99:1 (floor 4.5) */
+  --disabled: var(--ds-ink-500);
+  /* ratio: --fg on --selected = 16.14:1 (floor 4.5) */
+  --selected: var(--ds-mist-100);
+  /* ratio: --link on --panel = 8.09:1 (floor 4.5) */
+  --link: var(--ds-teal-700);
+
+  /* ---------------------------------------------------------------- *
+   * Spacing: the 4px scale (S3), as tokens.
+   * ---------------------------------------------------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  /* ---------------------------------------------------------------- *
+   * Type. A size is not a spacing length, so these are not on the 4px
+   * scale and are not asked to be; they are tokens so that no rule in
+   * dashboard.css writes a length of its own.
+   * ---------------------------------------------------------------- */
+  --text-xs: 14px;
+  --text-base: 16px;
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --line-body: 1.5;
+  --hairline: 1px;
+
+  /* ---------------------------------------------------------------- *
+   * Tier 3: component. A semantic bound to one part of this page.
+   * ---------------------------------------------------------------- */
+  --card-bg: var(--panel);
+  --card-line: var(--border);
+  --card-gap: var(--space-4);
+  --card-pad: var(--space-4);
+  --section-gap: var(--space-8);
+  --chart-mark: var(--mark);
+  --chart-axis: var(--border);
+  --chart-pad: var(--space-3);
+  --table-line: var(--line);
+  --table-pad: var(--space-2);
+  --state-ok: var(--ok);
+  --state-warn: var(--warn);
+  --state-bad: var(--bad);
+  --badge-pad: var(--space-1);
+  /* The width a source card stops sharing a row at, and the focus ring. */
+  --card-min: 280px;
+  --focus-ring: 2px;
+  /* How far a chart may scale up before its marks become blobs. */
+  --chart-max: 640px;
+}
+
+/*
+ * The dark theme, hand-authored value by value (S6). The primitives are
+ * re-pointed and every semantic is restated, so a reader sees the whole of what
+ * dark mode is in one block rather than as a diff against light.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* ratio: --fg on --bg = 16.30:1 (floor 4.5) */
+    --bg: var(--ds-slate-900);
+    --panel: var(--ds-slate-800);
+    --line: var(--ds-slate-700);
+    /* ratio: --fg on --panel = 15.12:1 (floor 4.5) */
+    --fg: var(--ds-mist-100);
+    /* ratio: --muted on --panel = 12.32:1 (floor 4.5) */
+    --muted: var(--ds-mist-200);
+    /* ratio: --accent on --panel = 10.13:1 (floor 4.5) */
+    --accent: var(--ds-teal-300);
+    /* ratio: --ok on --panel = 9.97:1 (floor 4.5) */
+    --ok: var(--ds-green-300);
+    /* ratio: --warn on --panel = 9.13:1 (floor 4.5) */
+    --warn: var(--ds-amber-300);
+    /* ratio: --bad on --panel = 7.28:1 (floor 4.5) */
+    --bad: var(--ds-red-300);
+    --border: var(--ds-slate-500);
+    /* ratio: --mark on --panel = 10.13:1 (floor 3) */
+    --mark: var(--ds-teal-300);
+    /* ratio: --focus on --panel = 10.13:1 (floor 3) */
+    --focus: var(--ds-teal-300);
+    /* ratio: --disabled on --panel = 12.32:1 (floor 4.5) */
+    --disabled: var(--ds-mist-200);
+    /* ratio: --fg on --selected = 12.92:1 (floor 4.5) */
+    --selected: var(--ds-slate-700);
+    /* ratio: --link on --panel = 10.13:1 (floor 4.5) */
+    --link: var(--ds-teal-300);
+  }
+}

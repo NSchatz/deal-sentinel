@@ -16,7 +16,7 @@ import type { GovernorConfig } from "./config.ts";
 import { Governor } from "./governor.ts";
 import type { AllowanceStore } from "./allowance.ts";
 import { LIVE_TRANSPORT, nullNotifier, systemClock, systemRandom } from "./ports.ts";
-import type { Clock, Notifier, RandomSource } from "./ports.ts";
+import type { Clock, Notifier, RandomSource, RequestOutcomeSink } from "./ports.ts";
 
 /**
  * The committed configuration file. Its numbers are conservative and
@@ -63,6 +63,16 @@ export function createSystemGovernor(options: {
   notifier?: Notifier;
   clock?: Clock;
   random?: RandomSource;
+  /**
+   * Where completed requests are recorded. REQUIRED, and deliberately so: this
+   * is the wiring that hands over the live transport, so a governor built here
+   * sends real requests from the household's address, and a default would let a
+   * caller send them while durably recording nothing. A caller with a database
+   * hands over `@deal-sentinel/db`'s store; a caller with none - a start check,
+   * a one-shot script - passes `discardingOutcomeSink` EXPLICITLY, which is a
+   * decision visible at the call site rather than one buried in a default.
+   */
+  outcomes: RequestOutcomeSink;
 }): Governor {
   const config =
     options.config ?? loadGovernorConfig(options.configPath ?? DEFAULT_CONFIG_PATH);
@@ -77,5 +87,6 @@ export function createSystemGovernor(options: {
     transport: LIVE_TRANSPORT,
     notifier: options.notifier ?? nullNotifier,
     allowanceStore: options.allowanceStore,
+    outcomes: options.outcomes,
   });
 }

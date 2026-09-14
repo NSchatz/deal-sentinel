@@ -16,6 +16,9 @@ import type {
   HttpTransport,
   Notification,
   Notifier,
+  OutcomeRecordingFailure,
+  RecordedRequestOutcome,
+  RequestOutcomeSink,
   TransportChoice,
   TransportRequest,
   TransportResponse,
@@ -88,6 +91,38 @@ export function recordingNotifier(): RecordingNotifier {
   };
 }
 
+export type RecordingOutcomeSink = RequestOutcomeSink & {
+  /** Every outcome the governor handed this sink, in order. */
+  readonly recorded: RecordedRequestOutcome[];
+  /** Every failure it was told about, for the case where recording throws. */
+  readonly failures: OutcomeRecordingFailure[];
+};
+
+/**
+ * A sink that keeps what it was given, and can be told to fail.
+ *
+ * `failWith` is how the criterion about a broken recorder is graded: the
+ * governor must hand back the request's own result and let the observation
+ * write proceed whatever this throws.
+ */
+export function recordingOutcomeSink(
+  options: { failWith?: Error } = {},
+): RecordingOutcomeSink {
+  const recorded: RecordedRequestOutcome[] = [];
+  const failures: OutcomeRecordingFailure[] = [];
+  return {
+    recorded,
+    failures,
+    record(outcome) {
+      if (options.failWith !== undefined) throw options.failWith;
+      recorded.push(outcome);
+    },
+    recordingFailed(failure) {
+      failures.push(failure);
+    },
+  };
+}
+
 export type SentRequest = TransportRequest & { at: number };
 
 export type RecordingTransport = HttpTransport & {
@@ -132,6 +167,7 @@ export type Harness = {
   notifier: RecordingNotifier;
   allowanceStore: AllowanceStore;
   config: GovernorConfig;
+  outcomes: RecordingOutcomeSink;
 };
 
 /**
@@ -150,11 +186,13 @@ export function buildGovernor(options: {
   random?: () => number;
   notifier?: RecordingNotifier;
   allowanceStore?: AllowanceStore;
+  outcomes?: RecordingOutcomeSink;
 }): Harness {
   const config = options.config ?? testConfig();
   const clock = options.clock ?? new FakeClock();
   const notifier = options.notifier ?? recordingNotifier();
   const allowanceStore = options.allowanceStore ?? createMemoryAllowanceStore();
+  const outcomes = options.outcomes ?? recordingOutcomeSink();
 
   const governor = new Governor({
     config,
@@ -163,9 +201,10 @@ export function buildGovernor(options: {
     transport: options.transport,
     notifier,
     allowanceStore,
+    outcomes,
   });
 
-  return { governor, clock, notifier, allowanceStore, config };
+  return { governor, clock, notifier, allowanceStore, config, outcomes };
 }
 
 /** The requests that were not the governor fetching a host's robots.txt. */
