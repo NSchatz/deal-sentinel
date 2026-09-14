@@ -244,7 +244,9 @@ describe("A10: the start check refuses to start, and says so with an exit code",
     );
 
     assert.ok(failure !== null, "a configuration missing a cooldown started anyway");
-    assert.equal(failure.code, 1);
+    // 3, not 1: the file was read, every input was legible and a constraint
+    // said no, which is an answer a start gate obeys rather than retries.
+    assert.equal(failure.code, 3);
     assert.match(failure.stderr, /refusing to start/);
     assert.match(failure.stderr, /cooldownMs/);
     assert.match(failure.stderr, /broken-alerts\.json/);
