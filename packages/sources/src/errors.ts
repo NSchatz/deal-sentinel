@@ -30,6 +30,22 @@ export class SourceConfigError extends Error {
 }
 
 /**
+ * The source configuration file could not be READ at all. A subclass, so every
+ * caller that already handles a `SourceConfigError` keeps handling this one,
+ * and the command can answer 2 for "the path you named is not there" where it
+ * answers 3 for "the file I read says no" (`cli` L1).
+ */
+export class SourceConfigUnreadableError extends SourceConfigError {
+  readonly path: string;
+
+  constructor(configPath: string, detail: string) {
+    super(detail);
+    this.name = "SourceConfigUnreadableError";
+    this.path = configPath;
+  }
+}
+
+/**
  * The credential a source needs is absent or empty where the system reads it
  * from. Carries the VARIABLE NAME and never a value: this error is designed to
  * be printed, and a class that could carry a secret into a log line would be

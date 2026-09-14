@@ -8,19 +8,56 @@
  * operator supplied, and whether a channel is configured at all.
  *
  * Contacts NOTHING - no database, no credential, no network - so it answers on
- * a box that has not started yet. Exits non-zero on a refusal, so a container
- * whose alert configuration is short of a setting does not start and then
- * quietly evaluate nothing.
+ * a box that has not started yet. A configuration it read and refused is 3, so
+ * a container whose alert configuration is short of a setting does not start
+ * and then quietly evaluate nothing; a path the caller named and this process
+ * cannot read is 2 instead.
  *
  * A channel that is not configured, or whose credential is absent, is REPORTED
- * and does not fail the check: the owner is entitled to see what their rules
- * would do before they have chosen where the alerts go.
+ * and exits 0: the owner is entitled to see what their rules would do before
+ * they have chosen where the alerts go.
  */
 
 import process from "node:process";
 
-import { AlertConfigError } from "../errors.ts";
+import {
+  EXIT_ERROR,
+  EXIT_OK,
+  EXIT_REFUSED,
+  EXIT_USAGE,
+  HELP_FLAG,
+  readInvocation,
+  renderHelp,
+  renderUsageError,
+} from "@deal-sentinel/shared";
+import type { ExitCode, HelpSpec } from "@deal-sentinel/shared";
+import { GovernorConfigError, GovernorConfigUnreadableError } from "@deal-sentinel/governor";
+
+import { AlertConfigError, AlertConfigUnreadableError } from "../errors.ts";
 import { alertsStartCheck } from "../start-check.ts";
+
+export const HELP: HelpSpec = {
+  command: "pnpm alerts:start-check",
+  summary:
+    "report every alert rule, the clearance endings and the delivery channel " +
+    "the committed configuration permits",
+  usage: "pnpm alerts:start-check [ALERTS_CONFIG] [GOVERNOR_CONFIG]",
+  args: [
+    {
+      name: "ALERTS_CONFIG",
+      required: false,
+      means: "path to the alert configuration; defaults to config/alerts.json",
+    },
+    {
+      name: "GOVERNOR_CONFIG",
+      required: false,
+      means: "path to the governor configuration; defaults to config/governor.json",
+    },
+  ],
+  flags: [HELP_FLAG],
+  exitCodes: [EXIT_OK, EXIT_ERROR, EXIT_USAGE, EXIT_REFUSED],
+  example: "pnpm alerts:start-check config/alerts.json config/governor.json",
+};
 
 /** Milliseconds as something a human reads without counting zeros. */
 function humanise(ms: number): string {
@@ -36,12 +73,7 @@ function humanise(ms: number): string {
   return `${ms}ms`;
 }
 
-try {
-  const report = alertsStartCheck({
-    alertsPath: process.argv[2],
-    governorPath: process.argv[3],
-  });
-
+function describe(report: ReturnType<typeof alertsStartCheck>): string {
   const lines = [`alert configuration ${report.configPath} is complete.`];
 
   for (const rule of report.rules) {
@@ -85,11 +117,48 @@ try {
     );
   }
 
-  process.stdout.write(`${lines.join("\n")}\n`);
-} catch (error) {
-  if (error instanceof AlertConfigError) {
-    process.stderr.write(`refusing to start: ${error.message}\n`);
-    process.exit(1);
-  }
-  throw error;
+  return `${lines.join("\n")}\n`;
 }
+
+function main(): ExitCode {
+  const invocation = readInvocation(process.argv.slice(2), HELP);
+  if (invocation.kind === "help") {
+    process.stdout.write(renderHelp(HELP));
+    return EXIT_OK;
+  }
+  if (invocation.kind === "usage-error") {
+    process.stderr.write(renderUsageError(HELP, invocation.problem));
+    return EXIT_USAGE;
+  }
+
+  const [alertsPath, governorPath] = invocation.positional;
+
+  try {
+    process.stdout.write(describe(alertsStartCheck({ alertsPath, governorPath })));
+    return EXIT_OK;
+  } catch (error) {
+    if (
+      error instanceof AlertConfigUnreadableError ||
+      error instanceof GovernorConfigUnreadableError
+    ) {
+      // A path the CALLER named is their mistake to fix; a committed default
+      // going missing is this installation failing to run at all.
+      const named = error.path === alertsPath || error.path === governorPath;
+      process.stderr.write(
+        `${HELP.command}: cannot read the configuration path ${error.path}. ${error.message}\n`,
+      );
+      return named ? EXIT_USAGE : EXIT_ERROR;
+    }
+    if (error instanceof AlertConfigError || error instanceof GovernorConfigError) {
+      process.stderr.write(`refusing to start: ${error.message}\n`);
+      return EXIT_REFUSED;
+    }
+    process.stderr.write(
+      `${HELP.command}: could not finish. ` +
+        `${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    return EXIT_ERROR;
+  }
+}
+
+process.exitCode = main();

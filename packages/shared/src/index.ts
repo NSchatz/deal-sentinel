@@ -6,6 +6,28 @@
  * extend the `reason` union; it may not change a success.
  */
 
+export {
+  EXIT_CODES,
+  EXIT_CODE_MEANINGS,
+  EXIT_ERROR,
+  EXIT_FINDING,
+  EXIT_OK,
+  EXIT_REFUSED,
+  EXIT_USAGE,
+  HELP_FLAG,
+  exitCodeMeaning,
+  readInvocation,
+  renderHelp,
+  renderUsageError,
+} from "./exit-codes.ts";
+export type {
+  ArgumentHelp,
+  ExitCode,
+  FlagHelp,
+  HelpSpec,
+  Invocation,
+} from "./exit-codes.ts";
+
 export type ExtractionFailureReason =
   | "no-offer"
   | "ambiguous-offer"

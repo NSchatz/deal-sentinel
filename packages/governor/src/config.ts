@@ -21,7 +21,7 @@
 
 import { readFileSync } from "node:fs";
 
-import { GovernorConfigError } from "./errors.ts";
+import { GovernorConfigError, GovernorConfigUnreadableError } from "./errors.ts";
 
 /** RFC 9309 section 2.4: the cache of a robots.txt decision is bounded. */
 export const ROBOTS_CACHE_BOUND_CEILING_MS = 24 * 60 * 60 * 1000;
@@ -120,7 +120,8 @@ export function loadGovernorConfig(path: string): GovernorConfig {
   try {
     text = readFileSync(path, "utf8");
   } catch (error) {
-    throw new GovernorConfigError(
+    throw new GovernorConfigUnreadableError(
+      path,
       `the governor configuration at ${path} could not be read, so the ` +
         "process refuses to start rather than fetch anything on a built-in " +
         `default: ${error instanceof Error ? error.message : String(error)}`,

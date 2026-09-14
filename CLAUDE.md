@@ -31,6 +31,34 @@ disagree, BRIEF.md wins and this file is wrong.
    configurable. The brief deliberately fixes no numbers; do not invent one and
    then treat it as decided.
 
+## Exit codes
+
+Every command this repository publishes answers with one of these, and every
+one of them prints this table in its own `--help` (`cli` L1, L1a, L5). The
+numbers are deal-sentinel's own: 1 is fixed by Node, which returns it for an
+uncaught exception; 2 and 3 are fixed by `packages/db/scripts/backup.sh`,
+`packages/db/scripts/restore.sh` and
+`docs/decisions/0005-container-image-pinning.md`; 4 is the first free number
+below the band Node produces for real programs. What binds is the distinctness,
+not the digits.
+
+| code | meaning |
+|---|---|
+| 0 | it ran and the answer is yes |
+| 1 | it could not run or could not finish |
+| 2 | the caller got the invocation wrong |
+| 3 | it ran, every input was legible, and a constraint said no |
+| 4 | it ran and found what it looks for |
+
+The distinction that carries the value is 1 against 3. A scheduler retries "it
+could not run" and obeys "it ran and the answer is no", so a command returning
+the same code for both makes a check that never executed indistinguishable from
+a check that passed. Reserved and never assigned a meaning here, because Node
+produces them for real programs: 9, 13, and anything above 128.
+
+`packages/shared/src/exit-codes.ts` holds the one copy of the numbers, their
+wording and the help renderer.
+
 ## This repo is a submodule of the SDD umbrella
 
 Everything above governs the code. This section is the umbrella's half of the

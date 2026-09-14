@@ -30,7 +30,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { AlertConfigError } from "./errors.ts";
+import { AlertConfigError, AlertConfigUnreadableError } from "./errors.ts";
 import type { WindowLowRule } from "./rules.ts";
 
 /** The committed configuration, beside the governor's and the sources'. */
@@ -84,7 +84,8 @@ export function loadAlertConfig(path: string = DEFAULT_ALERTS_CONFIG_PATH): Aler
   try {
     text = readFileSync(path, "utf8");
   } catch (error) {
-    throw new AlertConfigError(
+    throw new AlertConfigUnreadableError(
+      path,
       `the alert configuration at ${path} could not be read, so no rule has a ` +
         "window, a minimum or a cooldown and there is no built-in default to " +
         "fall back on. Nothing is evaluated and nothing is delivered: " +
